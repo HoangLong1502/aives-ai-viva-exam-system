@@ -10,7 +10,6 @@ export function proxy(request: NextRequest) {
   const token = request.cookies.get("aives_token")?.value;
   const isAuthed = Boolean(token);
   const { pathname } = request.nextUrl;
-
   const role = token ? decodeTokenClaims(token)?.role : undefined;
 
   if (pathname === "/login" && isAuthed && role) {

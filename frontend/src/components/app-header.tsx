@@ -15,6 +15,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { readTokenClaims } from "@/lib/auth";
+import { homeForRole } from "@/lib/role-home";
 import { ROLE_LABEL, type User } from "@/lib/types";
 
 function initials(name: string) {
@@ -42,7 +43,7 @@ export function AppHeader({
     <header className="border-b bg-card/80 backdrop-blur">
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
         <div className="flex items-center gap-6">
-          <Link href="/" className="flex items-center gap-3">
+          <Link href={homeForRole(user.role)} className="flex items-center gap-3">
             <BrandMark className="size-8 text-base" />
             <div className="leading-tight">
               <p className="font-serif text-lg">AIVES</p>
@@ -54,9 +55,9 @@ export function AppHeader({
           {showAdminNav ? (
             <nav className="flex items-center gap-4 text-sm">
               <Link
-                href="/"
+                href={homeForRole(user.role)}
                 className={
-                  pathname === "/"
+                  pathname === homeForRole(user.role)
                     ? "text-foreground"
                     : "text-muted-foreground hover:text-foreground"
                 }

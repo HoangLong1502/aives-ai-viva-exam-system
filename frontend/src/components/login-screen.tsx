@@ -22,8 +22,15 @@ export function LoginScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [mode, setMode] = useState<"sign-in" | "create">("sign-in");
+  const [selectedRole, setSelectedRole] = useState<Role | null>(null);
 
-  function finish(result: LoginResponse) {
+  function finish(result: LoginResponse, chosenRole: Role) {
+    if (result.user.role !== chosenRole) {
+      toast.error(
+        `This account is a ${ROLE_LABEL[result.user.role]}. Choose that role to enter.`,
+      );
+      return;
+    }
     setSession(result.accessToken);
     toast.success(`Welcome, ${result.user.name.split(" ")[0]}.`);
     router.replace(homeForRole(result.user.role));
@@ -32,6 +39,11 @@ export function LoginScreen() {
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const chosenRole = mode === "create" ? "STUDENT" : selectedRole;
+    if (!chosenRole) {
+      toast.error("Choose Student, Teacher, or Administrator to enter.");
+      return;
+    }
     setSubmitting(true);
 
     try {
@@ -45,7 +57,7 @@ export function LoginScreen() {
               : { email, password },
         },
       );
-      finish(result);
+      finish(result, chosenRole);
     } catch (error) {
       const message =
         error instanceof ApiError
@@ -58,13 +70,17 @@ export function LoginScreen() {
   }
 
   async function onGoogleCredential(idToken: string) {
+    if (!selectedRole) {
+      toast.error("Choose Student, Teacher, or Administrator to enter.");
+      return;
+    }
     setSubmitting(true);
     try {
       const result = await api<LoginResponse>("/api/auth/google", {
         method: "POST",
         body: { idToken },
       });
-      finish(result);
+      finish(result, selectedRole);
     } catch (error) {
       const message =
         error instanceof ApiError
@@ -152,7 +168,9 @@ export function LoginScreen() {
               {mode === "create" ? "Join the hall" : "Enter the hall"}
             </h1>
             <p className="text-sm leading-6 text-muted-foreground">
-              Use Google or an email and password to open the viva workspace.
+              {mode === "create"
+                ? "New accounts enter as a student."
+                : "Choose a role, then sign in to open that screen."}
             </p>
           </div>
 
@@ -166,6 +184,32 @@ export function LoginScreen() {
           </div>
 
           <form className="mt-4 space-y-6" onSubmit={onSubmit}>
+            {mode === "sign-in" ? (
+              <fieldset>
+                <legend className="text-sm font-medium">Role</legend>
+                <div className="mt-2 grid grid-cols-3 gap-2">
+                  {ROLE_CHOICES.map((choice) => {
+                    const selected = selectedRole === choice.value;
+                    return (
+                      <button
+                        key={choice.value}
+                        type="button"
+                        aria-pressed={selected}
+                        className={cn(
+                          "h-11 rounded-lg border text-sm",
+                          selected
+                            ? "border-primary bg-primary text-primary-foreground"
+                            : "border-input bg-background text-foreground hover:bg-muted",
+                        )}
+                        onClick={() => setSelectedRole(choice.value)}
+                      >
+                        {choice.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </fieldset>
+            ) : null}
             <FieldGroup>
               {mode === "create" ? (
                 <Field>

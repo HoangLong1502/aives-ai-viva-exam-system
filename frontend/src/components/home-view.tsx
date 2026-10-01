@@ -1,9 +1,9 @@
 "use client";
 
-import Link from "next/link";
-import { BookOpenIcon, ClipboardListIcon, Loader2Icon, MicIcon, ShieldIcon, SparklesIcon } from "lucide-react";
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { BookOpenIcon, ClipboardListIcon, Loader2Icon, MicIcon, SparklesIcon } from "lucide-react";
 import { AppHeader } from "@/components/app-header";
-import { buttonVariants } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -12,7 +12,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { readTokenClaims } from "@/lib/auth";
+import { homeForRole } from "@/lib/role-home";
 import { useCurrentUser } from "@/lib/use-current-user";
 
 function greeting() {
@@ -22,10 +22,28 @@ function greeting() {
   return "Good evening";
 }
 
-export function HomeView() {
+const PORTAL_COPY: Record<"STUDENT" | "EXAMINER", { eyebrow: string; lead: string }> = {
+  STUDENT: {
+    eyebrow: "Student",
+    lead: "This is your exam desk. Multiple-choice papers and oral vivas assigned to you will show up here.",
+  },
+  EXAMINER: {
+    eyebrow: "Teacher",
+    lead: "This is your exam hall. Sessions you are running, written or oral, will show up here.",
+  },
+};
+
+export function HomeView({ portal }: { portal: "STUDENT" | "EXAMINER" }) {
+  const router = useRouter();
   const { user, signOut } = useCurrentUser();
 
-  if (!user) {
+  useEffect(() => {
+    if (user && user.role !== portal) {
+      router.replace(homeForRole(user.role));
+    }
+  }, [user, portal, router]);
+
+  if (!user || user.role !== portal) {
     return (
       <div className="flex min-h-svh items-center justify-center bg-background">
         <Loader2Icon className="size-6 animate-spin text-muted-foreground" />
@@ -34,8 +52,7 @@ export function HomeView() {
   }
 
   const firstName = user.name.split(" ")[0];
-  const canOpenAdmin =
-    user.role === "ADMIN" && readTokenClaims()?.role === "ADMIN";
+  const copy = PORTAL_COPY[portal];
 
   return (
     <div className="min-h-svh bg-background">
@@ -44,14 +61,13 @@ export function HomeView() {
       <main className="mx-auto max-w-6xl space-y-8 px-6 py-10">
         <section className="flex flex-col gap-2">
           <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">
-            Home
+            {copy.eyebrow}
           </p>
           <h1 className="font-serif text-4xl tracking-tight md:text-5xl">
             {greeting()}, {firstName}.
           </h1>
           <p className="max-w-2xl text-sm leading-6 text-muted-foreground md:text-base">
-            This is your viva desk. Sessions, questions, and scores will live
-            here as the exam modules come online.
+            {copy.lead}
           </p>
         </section>
 
@@ -75,29 +91,6 @@ export function HomeView() {
             note="Question banks and scoring next"
           />
         </section>
-
-        {user.role === "ADMIN" ? (
-          <Card className="bg-card">
-            <CardHeader className="border-b">
-              <CardTitle className="flex items-center gap-2 font-serif text-2xl">
-                <ShieldIcon className="size-5" />
-                Administration
-              </CardTitle>
-              <CardDescription>
-                {canOpenAdmin
-                  ? "Roles and people live on the admin dashboard."
-                  : "Sign out and sign in again so this session can open the admin dashboard."}
-              </CardDescription>
-            </CardHeader>
-            {canOpenAdmin ? (
-              <CardContent>
-                <Link href="/admin" className={buttonVariants()}>
-                  Open dashboard
-                </Link>
-              </CardContent>
-            ) : null}
-          </Card>
-        ) : null}
 
         <Card className="bg-card">
           <CardHeader className="border-b">
