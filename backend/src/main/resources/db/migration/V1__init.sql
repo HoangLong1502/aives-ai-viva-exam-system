@@ -1,8 +1,6 @@
--- AIVES target schema for features 1 (question bank + rubric), 3 (AI viva core), 7 (administration).
--- Design reference: importable into drawDB (Import from SQL, PostgreSQL).
--- Applied by backend/src/main/resources/db/migration/V1__init.sql (which also adds indexes, CHECKs, vector(384) and seed rows).
--- Notes: embedding is vector(384) in PostgreSQL; CHECK constraints (bloom_level, status, source,
--- turn_type, FOLLOW_UP requires parent_turn_id) are documented in comments and to be added in a migration.
+-- AIVES schema: features 1 (question bank + rubric), 3 (AI viva core), 7 (administration).
+-- Compatibility columns kept for existing screens: question.source_ref, exam_session.format, exam_attempt.score.
+CREATE EXTENSION IF NOT EXISTS vector;
 
 CREATE TABLE role (
   id smallint PRIMARY KEY,
@@ -99,7 +97,7 @@ CREATE TABLE knowledge_chunk (
   source_label varchar(100),
   chunk_index int,
   content text NOT NULL,
-  embedding text NOT NULL, -- vector(384) in PostgreSQL
+  embedding vector(384) NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
@@ -126,7 +124,7 @@ CREATE TABLE question (
   topic varchar(255) NOT NULL,
   prompt text NOT NULL,
   expected_answer text,
-  source_ref text, -- compatibility: free-text citation of the source passage
+  source_ref text,
   key_points text,
   bloom_level varchar(20) NOT NULL, -- REMEMBER | UNDERSTAND | APPLY | ANALYZE
   status varchar(20) NOT NULL DEFAULT 'PENDING_REVIEW', -- PENDING_REVIEW | APPROVED | REJECTED
@@ -151,7 +149,7 @@ CREATE TABLE exam_session (
   language_config_id uuid NOT NULL,
   title varchar(255) NOT NULL,
   status varchar(20) NOT NULL DEFAULT 'DRAFT',
-  format varchar(20) NOT NULL DEFAULT 'ORAL', -- compatibility: ORAL | MULTIPLE_CHOICE
+  format varchar(20) NOT NULL DEFAULT 'ORAL',
   scheduled_at timestamptz,
   duration_minutes int,
   main_question_count int NOT NULL DEFAULT 3,
@@ -174,7 +172,7 @@ CREATE TABLE exam_attempt (
   status varchar(20) NOT NULL DEFAULT 'IN_PROGRESS',
   started_at timestamptz NOT NULL DEFAULT now(),
   submitted_at timestamptz,
-  score int, -- compatibility: teacher score used by existing score screens
+  score int,
   UNIQUE (session_id, student_id)
 );
 
@@ -237,3 +235,23 @@ ALTER TABLE question_turn ADD CONSTRAINT fk_qt_attempt FOREIGN KEY (attempt_id) 
 ALTER TABLE question_turn ADD CONSTRAINT fk_qt_question FOREIGN KEY (question_id) REFERENCES question(id);
 ALTER TABLE question_turn ADD CONSTRAINT fk_qt_parent FOREIGN KEY (parent_turn_id) REFERENCES question_turn(id);
 ALTER TABLE answer ADD CONSTRAINT fk_ans_turn FOREIGN KEY (turn_id) REFERENCES question_turn(id);
+
+CREATE INDEX knowledge_chunk_embedding_idx ON knowledge_chunk USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX idx_question_course_status ON question (course_id, status);
+CREATE INDEX idx_chunk_course ON knowledge_chunk (course_id);
+CREATE INDEX idx_chunk_document ON knowledge_chunk (document_id);
+CREATE INDEX idx_attempt_student ON exam_attempt (student_id);
+CREATE INDEX idx_session_teacher ON exam_session (teacher_id);
+
+ALTER TABLE question ADD CONSTRAINT ck_q_bloom CHECK (bloom_level IN ('REMEMBER','UNDERSTAND','APPLY','ANALYZE'));
+ALTER TABLE question ADD CONSTRAINT ck_q_status CHECK (status IN ('PENDING_REVIEW','APPROVED','REJECTED'));
+ALTER TABLE question ADD CONSTRAINT ck_q_source CHECK (source IN ('MANUAL','IMPORT','AI'));
+ALTER TABLE exam_session ADD CONSTRAINT ck_es_format CHECK (format IN ('MULTIPLE_CHOICE','ORAL'));
+ALTER TABLE question_turn ADD CONSTRAINT ck_qt_type CHECK (turn_type IN ('MAIN','FOLLOW_UP'));
+ALTER TABLE question_turn ADD CONSTRAINT ck_qt_parent CHECK (turn_type = 'MAIN' OR parent_turn_id IS NOT NULL);
+ALTER TABLE answer ADD CONSTRAINT ck_ans_status CHECK (status IN ('ANSWERED','TIMEOUT','SKIPPED'));
+
+INSERT INTO role (id, code, name) VALUES (1, 'ADMIN', 'Administrator'), (2, 'EXAMINER', 'Teacher'), (3, 'STUDENT', 'Student');
+INSERT INTO language_config (id, code, name, stt_language, tts_language, is_default) VALUES
+  ('00000000-0000-0000-0000-000000000001', 'vi', 'Vietnamese', 'vi-VN', 'vi-VN', true),
+  ('00000000-0000-0000-0000-000000000002', 'en', 'English', 'en-US', 'en-US', false);

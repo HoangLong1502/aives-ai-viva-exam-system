@@ -18,16 +18,17 @@ public class AdminStatsService {
     public AdminStats snapshot() {
         Map<String, Long> roles = counts(
                 """
-                SELECT role::text AS key, count(*) AS total
-                FROM "User"
-                GROUP BY role::text
+                SELECT r.code AS key, count(*) AS total
+                FROM app_user u
+                JOIN role r ON r.id = u.role_id
+                GROUP BY r.code
                 """
         );
         Map<String, Long> exams = counts(
                 """
-                SELECT format::text || ':' || status::text AS key, count(*) AS total
-                FROM exam
-                GROUP BY format::text, status::text
+                SELECT format || ':' || status AS key, count(*) AS total
+                FROM exam_session
+                GROUP BY format, status
                 """
         );
         return new AdminStats(

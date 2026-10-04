@@ -19,7 +19,7 @@ cd backend
 mvn spring-boot:run
 ```
 
-The API creates its tables on startup, including `knowledge_chunk.embedding` (`vector(384)`). Text is embedded locally with all-MiniLM-L6-v2 and stored in pgvector. If Postgres was created from the previous image, recreate it once:
+The API applies Flyway migrations from `backend/src/main/resources/db/migration` on startup, including `knowledge_chunk.embedding` (`vector(384)`). Text is embedded locally with all-MiniLM-L6-v2 and stored in pgvector. If Postgres was created from the previous image, recreate it once:
 
 ```bash
 docker compose down -v
@@ -53,7 +53,7 @@ The API does not seed users, subjects, exams, or course material. Create an admi
 
 Passages are embedded with all-MiniLM-L6-v2 and stored as `vector(384)` in Postgres.
 
-- `POST /api/knowledge` with `{ "title", "content" }` — examiner or administrator
+- `POST /api/knowledge` with `{ "courseId", "title", "content" }` — examiner or administrator
 - `GET /api/knowledge` — list stored passages
 - `GET /api/knowledge?q=strong oral answer` — nearest passages by cosine similarity
 

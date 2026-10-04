@@ -4,6 +4,7 @@ import com.aives.teaching.DeskRecords.AttemptItem;
 import com.aives.teaching.DeskRecords.SpeechSettings;
 import com.aives.teaching.DeskRecords.SubjectItem;
 import com.aives.teaching.JdbcDeskRepository;
+import com.aives.user.PublicUser;
 import com.aives.user.Role;
 import com.aives.user.UserRepository;
 import com.aives.web.ApiException;
@@ -13,6 +14,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -40,8 +42,11 @@ public class AdminDeskController {
     }
 
     @PostMapping("/subjects")
-    public void createSubject(@Valid @RequestBody SubjectRequest request) {
-        desk.insertSubject(UUID.randomUUID(), request.code().trim(), request.name().trim());
+    public void createSubject(
+            @AuthenticationPrincipal PublicUser admin,
+            @Valid @RequestBody SubjectRequest request
+    ) {
+        desk.insertSubject(UUID.randomUUID(), request.code().trim(), request.name().trim(), admin.id());
     }
 
     @PostMapping("/subjects/teachers")

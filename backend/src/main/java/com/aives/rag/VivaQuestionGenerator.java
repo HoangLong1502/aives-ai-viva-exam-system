@@ -29,6 +29,10 @@ public class VivaQuestionGenerator {
         return properties.ai().configured();
     }
 
+    public String modelName() {
+        return properties.ai().model();
+    }
+
     public List<Draft> generate(String topic, String bloom, int count, List<Passage> passages) {
         if (!configured()) {
             throw new ApiException(

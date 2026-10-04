@@ -18,14 +18,16 @@ public class JdbcKnowledgeRepository implements KnowledgeRepository {
     }
 
     @Override
-    public StoredKnowledge insert(String title, String content, float[] embedding) {
+    public StoredKnowledge insert(UUID courseId, String title, String content, float[] embedding) {
         UUID id = UUID.randomUUID();
         jdbc.update(
                 """
-                INSERT INTO knowledge_chunk (id, title, content, embedding)
-                VALUES (?, ?, ?, ?::vector)
+                INSERT INTO knowledge_chunk (id, course_id, topic, title, content, embedding)
+                VALUES (?, ?, ?, ?, ?, ?::vector)
                 """,
                 id,
+                courseId,
+                title,
                 title,
                 content,
                 VectorLiteral.format(embedding)

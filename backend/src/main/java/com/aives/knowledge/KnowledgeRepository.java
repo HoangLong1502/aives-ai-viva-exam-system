@@ -1,10 +1,11 @@
 package com.aives.knowledge;
 
 import java.util.List;
+import java.util.UUID;
 
 public interface KnowledgeRepository {
 
-    StoredKnowledge insert(String title, String content, float[] embedding);
+    StoredKnowledge insert(UUID courseId, String title, String content, float[] embedding);
 
     List<StoredKnowledge> list();
 
