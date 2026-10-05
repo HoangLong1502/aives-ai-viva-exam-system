@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { api, ApiError } from "@/lib/api";
+import { useLocale } from "@/lib/i18n/locale-provider";
 
 type Subject = { id: string; name: string; code: string };
 type Rubric = { id: string; name: string; criteria: string; maxScore: number };
@@ -23,6 +24,7 @@ type Question = {
 const BLOOM = ["REMEMBER", "UNDERSTAND", "APPLY", "ANALYZE"] as const;
 
 export function TeacherTests() {
+  const { t } = useLocale();
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [rubrics, setRubrics] = useState<Rubric[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
@@ -139,19 +141,17 @@ export function TeacherTests() {
   return (
     <div className="space-y-6">
       <section className="space-y-2">
-        <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Tests</p>
-        <h1 className="font-serif text-4xl tracking-tight">Start a viva test</h1>
-        <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-          Draft oral questions from imported course material, review them, then open a session with the approved set.
+        <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">
+          {t("teacher.tests.eyebrow")}
         </p>
+        <h1 className="font-serif text-4xl tracking-tight">{t("teacher.tests.title")}</h1>
+        <p className="max-w-2xl text-sm leading-6 text-muted-foreground">{t("teacher.tests.lead")}</p>
       </section>
 
       <Card>
         <CardHeader className="border-b">
-          <CardTitle className="font-serif text-2xl">Draft from material</CardTitle>
-          <CardDescription>
-            Uses RAG over the subject&apos;s uploaded slides or textbook. Drafts stay out of the official bank until you approve them.
-          </CardDescription>
+          <CardTitle className="font-serif text-2xl">{t("teacher.tests.draftTitle")}</CardTitle>
+          <CardDescription>{t("teacher.tests.draftDesc")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-3 md:grid-cols-2">
@@ -160,7 +160,9 @@ export function TeacherTests() {
               value={subjectId}
               onChange={(event) => setSubjectId(event.target.value)}
             >
-              {subjects.length === 0 ? <option value="">No subjects yet</option> : null}
+              {subjects.length === 0 ? (
+                <option value="">{t("teacher.tests.noSubjects")}</option>
+              ) : null}
               {subjects.map((subject) => (
                 <option key={subject.id} value={subject.id}>
                   {subject.code} — {subject.name}

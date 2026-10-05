@@ -16,9 +16,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { LanguageSwitch } from "@/components/language-switch";
+import { useLocale, useRoleLabel } from "@/lib/i18n/locale-provider";
 import { homeForRole } from "@/lib/role-home";
 import { useCurrentUser } from "@/lib/use-current-user";
-import { ROLE_LABEL, type Role } from "@/lib/types";
+import type { Role } from "@/lib/types";
 import { cn } from "cn";
 
 export function PortalShell({
@@ -35,13 +37,15 @@ export function PortalShell({
   const router = useRouter();
   const pathname = usePathname();
   const { user, signOut } = useCurrentUser();
+  const { t } = useLocale();
+  const roleLabel = useRoleLabel(user?.role ?? role);
 
   useEffect(() => {
     if (user && user.role !== role) {
-      toast.error("That screen belongs to another role.");
+      toast.error(t("errors.wrongRolePortal"));
       router.replace(homeForRole(user.role));
     }
-  }, [user, role, router]);
+  }, [user, role, router, t]);
 
   if (!user || user.role !== role) {
     return (
@@ -63,6 +67,8 @@ export function PortalShell({
             </p>
           </div>
         </Link>
+        <div className="flex items-center gap-2 sm:gap-3">
+          <LanguageSwitch />
         <DropdownMenu>
           <DropdownMenuTrigger className="inline-flex h-10 items-center gap-2 rounded-lg px-2 text-sm hover:bg-muted">
             <Avatar size="sm">
@@ -77,17 +83,18 @@ export function PortalShell({
               <DropdownMenuLabel className="font-normal">
                 <p className="font-medium">{user.name}</p>
                 <p className="text-xs text-muted-foreground">
-                  {ROLE_LABEL[user.role]}
+                  {roleLabel}
                 </p>
               </DropdownMenuLabel>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={signOut}>
               <LogOutIcon />
-              Sign out
+              {t("common.signOut")}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        </div>
       </header>
       <div className="flex min-h-0 flex-1">
         <aside className="hidden w-56 shrink-0 border-r bg-card/40 md:block">

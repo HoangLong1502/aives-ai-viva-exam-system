@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { api, ApiError } from "@/lib/api";
+import { useLocale } from "@/lib/i18n/locale-provider";
 
 type Subject = { id: string; code: string; name: string };
 type Rubric = { id: string; name: string; criteria: string; maxScore: number };
@@ -29,6 +30,7 @@ type DocumentFile = { id: string; name: string; chunks: number };
 const BLOOM = ["REMEMBER", "UNDERSTAND", "APPLY", "ANALYZE"] as const;
 
 export function TeacherBank() {
+  const { t } = useLocale();
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [rubrics, setRubrics] = useState<Rubric[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
@@ -169,36 +171,33 @@ export function TeacherBank() {
   return (
     <div className="space-y-8">
       <section className="space-y-2">
-        <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Question bank & rubric</p>
-        <h1 className="font-serif text-4xl tracking-tight">Manage viva questions</h1>
-        <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-          Import course materials, write or import oral questions, and attach Bloom levels plus scoring rubrics.
-          AI drafts are reviewed here or when you start a test before they enter the official bank.
+        <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">
+          {t("teacher.bank.eyebrow")}
         </p>
+        <h1 className="font-serif text-4xl tracking-tight">{t("teacher.bank.title")}</h1>
+        <p className="max-w-2xl text-sm leading-6 text-muted-foreground">{t("teacher.bank.lead")}</p>
       </section>
 
       <Card>
         <CardHeader className="border-b">
-          <CardTitle className="font-serif text-2xl">Subject & course material</CardTitle>
-          <CardDescription>
-            Create a subject, then import a PDF, DOCX, or PPTX. Files are indexed for RAG when you draft questions at test creation.
-          </CardDescription>
+          <CardTitle className="font-serif text-2xl">{t("teacher.bank.subjectTitle")}</CardTitle>
+          <CardDescription>{t("teacher.bank.subjectDesc")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           <form className="flex flex-col gap-2 sm:flex-row" onSubmit={onCreateSubject}>
             <Input
               value={subjectCode}
               onChange={(event) => setSubjectCode(event.target.value)}
-              placeholder="Code"
+              placeholder={t("teacher.bank.codePlaceholder")}
               required
             />
             <Input
               value={subjectName}
               onChange={(event) => setSubjectName(event.target.value)}
-              placeholder="Subject name"
+              placeholder={t("teacher.bank.namePlaceholder")}
               required
             />
-            <Button type="submit">Create subject</Button>
+            <Button type="submit">{t("teacher.bank.createSubject")}</Button>
           </form>
 
           <form className="space-y-3" onSubmit={onMaterial}>
@@ -208,7 +207,9 @@ export function TeacherBank() {
               onChange={(event) => setSubjectId(event.target.value)}
               required
             >
-              {subjects.length === 0 ? <option value="">Create a subject first</option> : null}
+              {subjects.length === 0 ? (
+                <option value="">{t("teacher.bank.createSubjectFirst")}</option>
+              ) : null}
               {subjects.map((subject) => (
                 <option key={subject.id} value={subject.id}>
                   {subject.code} — {subject.name}
@@ -242,7 +243,7 @@ export function TeacherBank() {
 
       <Card>
         <CardHeader className="border-b">
-          <CardTitle className="font-serif text-2xl">Add questions</CardTitle>
+          <CardTitle className="font-serif text-2xl">{t("teacher.bank.addTitle")}</CardTitle>
           <CardDescription>
             Write a question or import one prompt per line. Each item needs a Bloom level and a rubric.
           </CardDescription>
