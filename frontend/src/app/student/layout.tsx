@@ -1,14 +1,5 @@
-import { PortalShell } from "@/components/portal-shell";
-
-const NAV = [
-  { href: "/student", label: "Tests", exact: true },
-  { href: "/student/scores", label: "Scores" },
-];
+import { StudentLayoutClient } from "@/components/layouts/student-layout-client";
 
 export default function StudentLayout({ children }: { children: React.ReactNode }) {
-  return (
-    <PortalShell role="STUDENT" eyebrow="Student" nav={NAV}>
-      {children}
-    </PortalShell>
-  );
+  return <StudentLayoutClient>{children}</StudentLayoutClient>;
 }

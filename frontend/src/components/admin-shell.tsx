@@ -4,6 +4,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useMemo,
   type ReactNode,
 } from "react";
 import Link from "next/link";
@@ -29,16 +30,18 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { LanguageSwitch } from "@/components/language-switch";
+import { useLocale, useRoleLabel } from "@/lib/i18n/locale-provider";
 import { useCurrentUser } from "@/lib/use-current-user";
-import { ROLE_LABEL, type User } from "@/lib/types";
+import type { User } from "@/lib/types";
 import { cn } from "cn";
 
-const NAV = [
-  { href: "/admin", label: "Dashboard", icon: LayoutDashboardIcon, exact: true },
-  { href: "/admin/people", label: "People", icon: UsersIcon, exact: false },
-  { href: "/admin/performance", label: "Performance", icon: ClipboardListIcon, exact: false },
-  { href: "/admin/settings", label: "Settings", icon: SettingsIcon, exact: false },
-  { href: "/admin/knowledge", label: "Knowledge", icon: BookOpenIcon, exact: false },
+const NAV_ICONS = [
+  { href: "/admin", key: "nav.admin.dashboard", icon: LayoutDashboardIcon, exact: true },
+  { href: "/admin/people", key: "nav.admin.people", icon: UsersIcon, exact: false },
+  { href: "/admin/performance", key: "nav.admin.performance", icon: ClipboardListIcon, exact: false },
+  { href: "/admin/settings", key: "nav.admin.settings", icon: SettingsIcon, exact: false },
+  { href: "/admin/knowledge", key: "nav.admin.knowledge", icon: BookOpenIcon, exact: false },
 ] as const;
 
 type AdminSession = {
@@ -75,13 +78,23 @@ export function AdminShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const { user, setUser, signOut } = useCurrentUser();
+  const { t } = useLocale();
+  const roleLabel = useRoleLabel("ADMIN");
+  const nav = useMemo(
+    () =>
+      NAV_ICONS.map((item) => ({
+        ...item,
+        label: t(item.key),
+      })),
+    [t],
+  );
 
   useEffect(() => {
     if (user && user.role !== "ADMIN") {
-      toast.error("Only administrators can open this dashboard.");
+      toast.error(t("errors.adminOnly"));
       router.replace("/");
     }
-  }, [user, router]);
+  }, [user, router, t]);
 
   if (!user || user.role !== "ADMIN") {
     return (
@@ -100,13 +113,14 @@ export function AdminShell({ children }: { children: ReactNode }) {
             <div className="leading-tight">
               <p className="font-serif text-lg">AIVES</p>
               <p className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
-                Administration
+                {t("brand.adminEyebrow")}
               </p>
             </div>
           </Link>
           <div className="flex items-center gap-3">
+            <LanguageSwitch />
             <span className="hidden text-sm text-muted-foreground sm:block">
-              {ROLE_LABEL[user.role]}
+              {roleLabel}
             </span>
             <DropdownMenu>
               <DropdownMenuTrigger className="inline-flex h-10 items-center gap-2 rounded-lg px-1.5 text-sm hover:bg-muted sm:px-2.5">
@@ -129,7 +143,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={signOut}>
                   <LogOutIcon />
-                  Sign out
+                  {t("common.signOut")}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -138,11 +152,11 @@ export function AdminShell({ children }: { children: ReactNode }) {
 
         <div className="flex min-h-0 flex-1">
           <aside className="hidden w-60 shrink-0 border-r bg-card/40 md:block">
-            <AdminNav pathname={pathname} />
+            <AdminNav pathname={pathname} items={nav} />
           </aside>
           <div className="flex min-w-0 flex-1 flex-col">
             <div className="border-b md:hidden">
-              <AdminNav pathname={pathname} compact />
+              <AdminNav pathname={pathname} items={nav} compact />
             </div>
             <div className="mx-auto w-full max-w-5xl flex-1 px-4 py-8 sm:px-8">
               {children}
@@ -156,9 +170,11 @@ export function AdminShell({ children }: { children: ReactNode }) {
 
 function AdminNav({
   pathname,
+  items,
   compact = false,
 }: {
   pathname: string;
+  items: { href: string; label: string; icon: typeof LayoutDashboardIcon; exact: boolean }[];
   compact?: boolean;
 }) {
   return (
@@ -168,7 +184,7 @@ function AdminNav({
         compact ? "flex-row overflow-x-auto" : "flex-col",
       )}
     >
-      {NAV.map((item) => {
+      {items.map((item) => {
         const active = isActive(pathname, item.href, item.exact);
         const Icon = item.icon;
         return (
