@@ -3,6 +3,7 @@ package com.aives.knowledge;
 import com.aives.embedding.EmbeddingService;
 import com.aives.web.ApiException;
 import java.util.List;
+import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
@@ -17,11 +18,11 @@ public class KnowledgeService {
         this.embeddings = embeddings;
     }
 
-    public StoredKnowledge create(String title, String content) {
+    public StoredKnowledge create(UUID courseId, String title, String content) {
         String cleanTitle = title.trim();
         String cleanContent = content.trim();
         float[] embedding = embeddings.embed(cleanTitle + "\n" + cleanContent);
-        return knowledge.insert(cleanTitle, cleanContent, embedding);
+        return knowledge.insert(courseId, cleanTitle, cleanContent, embedding);
     }
 
     public List<StoredKnowledge> list() {

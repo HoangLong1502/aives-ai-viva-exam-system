@@ -10,7 +10,7 @@ public final class DeskRecords {
     public record SubjectItem(String id, String code, String name, List<String> teacherIds) {
     }
 
-    public record RubricItem(String id, String name, String criteria, int maxScore) {
+    public record RubricItem(String id, String name, String criteria, int maxScore, String subjectId) {
     }
 
     public record QuestionItem(

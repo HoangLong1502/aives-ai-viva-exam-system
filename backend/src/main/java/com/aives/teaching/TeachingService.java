@@ -50,7 +50,7 @@ public class TeachingService {
         }
         UUID id = UUID.randomUUID();
         try {
-            desk.insertSubject(id, trimmedCode, trimmedName);
+            desk.insertSubject(id, trimmedCode, trimmedName, teacher.id());
         } catch (DuplicateKeyException exception) {
             throw new ApiException(HttpStatus.CONFLICT, "A subject with that code already exists");
         }
@@ -68,8 +68,8 @@ public class TeachingService {
         return ingestion.ingest(teacher.id(), subjectId, file);
     }
 
-    public List<RubricItem> rubrics() {
-        return desk.rubrics();
+    public List<RubricItem> rubrics(PublicUser teacher) {
+        return desk.rubricsForTeacher(teacher.id());
     }
 
     public List<QuestionItem> questions(String status) {
@@ -85,7 +85,7 @@ public class TeachingService {
             String rubricId
     ) {
         requireSubject(teacher.id(), subjectId);
-        return save(teacher.id(), subjectId, topic, prompt, bloom, rubricId, "APPROVED", "MANUAL", null);
+        return save(teacher.id(), subjectId, topic, prompt, bloom, rubricId, "APPROVED", "MANUAL", null, null);
     }
 
     public List<QuestionItem> importLines(
@@ -104,7 +104,7 @@ public class TeachingService {
             if (prompt.isEmpty()) {
                 continue;
             }
-            created.add(save(teacher.id(), subjectId, topic, prompt, bloom, rubricId, "APPROVED", "IMPORT", null));
+            created.add(save(teacher.id(), subjectId, topic, prompt, bloom, rubricId, "APPROVED", "IMPORT", null, null));
         }
         if (created.isEmpty()) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "Paste at least one question");
@@ -135,8 +135,20 @@ public class TeachingService {
                     "Upload a PDF, DOCX, or PPTX for this subject before generating questions."
             );
         }
+        requireRubric(rubricId, subjectId);
+        List<Draft> drafts = generator.generate(topic, bloom, bounded, passages);
+        UUID generationId = UUID.randomUUID();
+        desk.insertGenerationRequest(
+                generationId,
+                subjectId,
+                teacher.id(),
+                topic.trim(),
+                bloom,
+                bounded,
+                generator.modelName()
+        );
         List<QuestionItem> created = new ArrayList<>();
-        for (Draft draft : generator.generate(topic, bloom, bounded, passages)) {
+        for (Draft draft : drafts) {
             created.add(save(
                     teacher.id(),
                     subjectId,
@@ -146,13 +158,14 @@ public class TeachingService {
                     rubricId,
                     "PENDING_REVIEW",
                     "AI",
-                    draft.source()
+                    draft.source(),
+                    generationId.toString()
             ));
         }
         return created;
     }
 
-    public QuestionItem review(String id, String prompt, String bloom, String status) {
+    public QuestionItem review(PublicUser reviewer, String id, String prompt, String bloom, String status) {
         QuestionItem current = desk.question(id);
         if (current == null) {
             throw new ApiException(HttpStatus.NOT_FOUND, "Question not found");
@@ -161,7 +174,7 @@ public class TeachingService {
         if (!Set.of("PENDING_REVIEW", "APPROVED", "REJECTED").contains(status)) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "Unknown question status");
         }
-        desk.updateQuestion(id, prompt.trim(), bloom, status);
+        desk.updateQuestion(id, prompt.trim(), bloom, status, reviewer.id());
         return desk.question(id);
     }
 
@@ -207,12 +220,14 @@ public class TeachingService {
             String rubricId,
             String status,
             String source,
-            String sourceRef
+            String sourceRef,
+            String generationId
     ) {
         if (prompt == null || prompt.isBlank() || topic == null || topic.isBlank()) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "Topic and prompt are required");
         }
         requireBloom(bloom);
+        requireRubric(rubricId, subjectId);
         UUID id = UUID.randomUUID();
         desk.insertQuestion(
                 id,
@@ -224,7 +239,8 @@ public class TeachingService {
                 status,
                 source,
                 authorId,
-                sourceRef
+                sourceRef,
+                generationId
         );
         return desk.question(id.toString());
     }
@@ -232,6 +248,12 @@ public class TeachingService {
     private void requireSubject(String teacherId, String subjectId) {
         if (!desk.teacherOwnsSubject(teacherId, subjectId)) {
             throw new ApiException(HttpStatus.FORBIDDEN, "You are not assigned to that subject");
+        }
+    }
+
+    private void requireRubric(String rubricId, String subjectId) {
+        if (!desk.rubricBelongsToCourse(rubricId, subjectId)) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "That rubric belongs to a different subject");
         }
     }
 

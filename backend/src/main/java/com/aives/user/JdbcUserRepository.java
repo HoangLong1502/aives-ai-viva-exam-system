@@ -13,6 +13,13 @@ public class JdbcUserRepository implements UserRepository {
 
     private static final RowMapper<UserAccount> USER = (rs, rowNum) -> map(rs);
 
+    private static final String SELECT = """
+            SELECT u.id::text AS id, u.email, u.full_name AS name, u.password_hash AS password,
+                   r.code AS role, u.google_sub
+            FROM "user" u
+            JOIN role r ON r.id = u.role_id
+            """;
+
     private final JdbcTemplate jdbc;
 
     public JdbcUserRepository(JdbcTemplate jdbc) {
@@ -21,43 +28,25 @@ public class JdbcUserRepository implements UserRepository {
 
     @Override
     public Optional<UserAccount> findByEmail(String email) {
-        return jdbc.query(
-                """
-                SELECT id, email, name, password, role::text AS role, google_sub
-                FROM "User"
-                WHERE email = ?
-                """,
-                USER,
-                email
-        ).stream().findFirst();
+        return jdbc.query(SELECT + " WHERE u.email = ?", USER, email).stream().findFirst();
     }
 
     @Override
     public Optional<UserAccount> findById(String id) {
-        return jdbc.query(
-                """
-                SELECT id, email, name, password, role::text AS role, google_sub
-                FROM "User"
-                WHERE id = ?
-                """,
-                USER,
-                id
-        ).stream().findFirst();
+        return jdbc.query(SELECT + " WHERE u.id = ?::uuid", USER, id).stream().findFirst();
     }
 
     @Override
     public List<UserAccount> findAllOrdered() {
         return jdbc.query(
-                """
-                SELECT id, email, name, password, role::text AS role, google_sub
-                FROM "User"
-                ORDER BY CASE role::text
-                    WHEN 'STUDENT' THEN 0
-                    WHEN 'EXAMINER' THEN 1
-                    WHEN 'ADMIN' THEN 2
-                    ELSE 3
-                END, name ASC
-                """,
+                SELECT + """
+                        ORDER BY CASE r.code
+                            WHEN 'STUDENT' THEN 0
+                            WHEN 'EXAMINER' THEN 1
+                            WHEN 'ADMIN' THEN 2
+                            ELSE 3
+                        END, u.full_name ASC
+                        """,
                 USER
         );
     }
@@ -66,7 +55,7 @@ public class JdbcUserRepository implements UserRepository {
     public long countByRole(Role role) {
         Long count = jdbc.queryForObject(
                 """
-                SELECT count(*) FROM "User" WHERE role::text = ?
+                SELECT count(*) FROM "user" u JOIN role r ON r.id = u.role_id WHERE r.code = ?
                 """,
                 Long.class,
                 role.name()
@@ -78,9 +67,9 @@ public class JdbcUserRepository implements UserRepository {
     public UserAccount updateRole(String id, Role role) {
         jdbc.update(
                 """
-                UPDATE "User"
-                SET role = ?::"Role", "updatedAt" = CURRENT_TIMESTAMP
-                WHERE id = ?
+                UPDATE "user"
+                SET role_id = (SELECT id FROM role WHERE code = ?), updated_at = now()
+                WHERE id = ?::uuid
                 """,
                 role.name(),
                 id
@@ -92,9 +81,9 @@ public class JdbcUserRepository implements UserRepository {
     public void linkGoogleSubject(String id, String googleSub) {
         jdbc.update(
                 """
-                UPDATE "User"
-                SET google_sub = ?, "updatedAt" = CURRENT_TIMESTAMP
-                WHERE id = ? AND google_sub IS NULL
+                UPDATE "user"
+                SET google_sub = ?, updated_at = now()
+                WHERE id = ?::uuid AND google_sub IS NULL
                 """,
                 googleSub,
                 id
@@ -105,8 +94,8 @@ public class JdbcUserRepository implements UserRepository {
     public void insert(UserAccount user) {
         jdbc.update(
                 """
-                INSERT INTO "User" (id, email, password, name, role, google_sub, "createdAt", "updatedAt")
-                VALUES (?, ?, ?, ?, ?::"Role", ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                INSERT INTO "user" (id, email, password_hash, full_name, role_id, google_sub)
+                VALUES (?::uuid, ?, ?, ?, (SELECT id FROM role WHERE code = ?), ?)
                 """,
                 user.id(),
                 user.email(),

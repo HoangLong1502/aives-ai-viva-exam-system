@@ -48,8 +48,8 @@ public class TeachingController {
     }
 
     @GetMapping("/rubrics")
-    public List<RubricItem> rubrics() {
-        return teaching.rubrics();
+    public List<RubricItem> rubrics(@AuthenticationPrincipal PublicUser teacher) {
+        return teaching.rubrics(teacher);
     }
 
     @GetMapping("/documents")
@@ -120,8 +120,12 @@ public class TeachingController {
     }
 
     @PatchMapping("/questions/{id}")
-    public QuestionItem review(@PathVariable String id, @Valid @RequestBody ReviewRequest request) {
-        return teaching.review(id, request.prompt(), request.bloom(), request.status());
+    public QuestionItem review(
+            @AuthenticationPrincipal PublicUser reviewer,
+            @PathVariable String id,
+            @Valid @RequestBody ReviewRequest request
+    ) {
+        return teaching.review(reviewer, id, request.prompt(), request.bloom(), request.status());
     }
 
     @PostMapping("/exams")

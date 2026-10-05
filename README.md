@@ -19,7 +19,7 @@ cd backend
 mvn spring-boot:run
 ```
 
-The API creates its tables on startup, including `knowledge_chunk.embedding` (`vector(384)`). Text is embedded locally with all-MiniLM-L6-v2 and stored in pgvector. If Postgres was created from the previous image, recreate it once:
+On startup the API creates the schema from `backend/src/main/resources/schema.sql` if the database is empty, including `knowledge_chunk.embedding` (`vector(384)`). Text is embedded locally with all-MiniLM-L6-v2 and stored in pgvector. If Postgres was created from the previous image, recreate it once:
 
 ```bash
 docker compose down -v
@@ -47,13 +47,13 @@ Postgres is mapped to **5433** so it does not collide with other local databases
 
 ## Accounts
 
-The API does not seed users, subjects, exams, or course material. Create an administrator, then assign teachers and students. Login returns a JWT that includes `sub`, `email`, and `role`.
+On an empty database the API also loads demo data from `backend/src/main/resources/seed.sql`: 1 admin, 1 teacher, 3 students, 2 courses, rubrics, 5 questions, 2 exam sessions and 1 submitted attempt. Every demo account uses the password `Password123`: `admin@aives.test`, `teacher@aives.test`, `student1@aives.test`, `student2@aives.test`, `student3@aives.test`. Login returns a JWT that includes `sub`, `email`, and `role`.
 
 ## Knowledge embeddings
 
 Passages are embedded with all-MiniLM-L6-v2 and stored as `vector(384)` in Postgres.
 
-- `POST /api/knowledge` with `{ "title", "content" }` — examiner or administrator
+- `POST /api/knowledge` with `{ "courseId", "title", "content" }` — examiner or administrator
 - `GET /api/knowledge` — list stored passages
 - `GET /api/knowledge?q=strong oral answer` — nearest passages by cosine similarity
 
