@@ -21,9 +21,22 @@ public class SchemaInitializer {
     @PostConstruct
     void init() {
         String existing = jdbc.queryForObject("SELECT to_regclass('public.\"user\"')::text", String.class);
-        if (existing != null) {
+        if (existing == null) {
+            new ResourceDatabasePopulator(new ClassPathResource("schema.sql"), new ClassPathResource("seed.sql"))
+                    .execute(dataSource);
             return;
         }
-        new ResourceDatabasePopulator(new ClassPathResource("schema.sql"), new ClassPathResource("seed.sql")).execute(dataSource);
+        if (!hasQuestions()) {
+            new ResourceDatabasePopulator(new ClassPathResource("seed.sql")).execute(dataSource);
+        }
+    }
+
+    private boolean hasQuestions() {
+        String questionTable = jdbc.queryForObject("SELECT to_regclass('public.question')::text", String.class);
+        if (questionTable == null) {
+            return true;
+        }
+        Integer count = jdbc.queryForObject("SELECT COUNT(*) FROM question", Integer.class);
+        return count != null && count > 0;
     }
 }

@@ -47,7 +47,7 @@ Postgres is mapped to **5433** so it does not collide with other local databases
 
 ## Accounts
 
-On an empty database the API also loads demo data from `backend/src/main/resources/seed.sql`: 1 admin, 1 teacher, 3 students, 2 courses, rubrics, 5 questions, 2 exam sessions and 1 submitted attempt. Every demo account uses the password `Password123`: `admin@aives.test`, `teacher@aives.test`, `student1@aives.test`, `student2@aives.test`, `student3@aives.test`. Login returns a JWT that includes `sub`, `email`, and `role`.
+On an empty database the API also loads demo data from `backend/src/main/resources/seed.sql`: 1 admin, 1 teacher, 3 students, 2 courses, rubrics, 10 sample viva questions (approved and pending review), 2 exam sessions and 1 submitted attempt. If the database already existed without questions, restarting the API runs `seed.sql` again only while the question bank is empty. Every demo account uses the password `Password123`: `admin@aives.test`, `teacher@aives.test`, `student1@aives.test`, `student2@aives.test`, `student3@aives.test`. Login returns a JWT that includes `sub`, `email`, and `role`.
 
 ## Knowledge embeddings
 
