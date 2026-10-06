@@ -19,7 +19,16 @@ cd backend
 mvn spring-boot:run
 ```
 
-On startup the API creates the schema from `backend/src/main/resources/schema.sql` if the database is empty, including `knowledge_chunk.embedding` (`vector(384)`). Text is embedded locally with all-MiniLM-L6-v2 and stored in pgvector. If Postgres was created from the previous image, recreate it once:
+On first boot against an **empty** Postgres volume the API applies `schema.sql` and `seed.sql` once, then records that in `app_meta`. Later restarts keep every account and row you created.
+
+**Do not** run `docker compose down -v` unless you intentionally want a blank database. The `-v` flag deletes the `aives_pgdata` volume (all users, exams, questions). Prefer:
+
+```bash
+docker compose down      # stop containers, keep data
+docker compose up -d     # start again with the same data
+```
+
+Only recreate the volume when the SQL schema itself must be rebuilt (rare):
 
 ```bash
 docker compose down -v
@@ -45,9 +54,35 @@ npm run dev
 
 Postgres is mapped to **5433** so it does not collide with other local databases on 5432. The Next.js app uses **3001** for the same reason.
 
-## Accounts
+## Accounts & demo data
 
-On an empty database the API also loads demo data from `backend/src/main/resources/seed.sql`: 1 admin, 1 teacher, 3 students, 2 courses, rubrics, 10 sample viva questions (approved and pending review), 2 exam sessions and 1 submitted attempt. If the database already existed without questions, restarting the API runs `seed.sql` again only while the question bank is empty. Every demo account uses the password `Password123`: `admin@aives.test`, `teacher@aives.test`, `student1@aives.test`, `student2@aives.test`, `student3@aives.test`. Login returns a JWT that includes `sub`, `email`, and `role`.
+Demo rows live in `backend/src/main/resources/seed.sql` (admin / teacher / students, courses, rubrics, sample questions and exam sessions). Default demo password: `Password123` for `admin@aives.test`, `teacher@aives.test`, `student1@aives.test`, `student2@aives.test`, `student3@aives.test`.
+
+Accounts you **register** in the UI are stored only in your local Docker volume. They are **not** in Git. Restarting the API does not delete them; wiping the volume does.
+
+### Share your DB content with teammates (pull and see the same exams)
+
+Git never copies Docker volumes. To ship the data you created (users, courses, questions, exam sessions):
+
+1. Keep Postgres running with your data.
+2. Export into the seed file and commit it:
+
+```bash
+npm run db:export-seed
+# or: bash scripts/export-seed.sh
+git add backend/src/main/resources/seed.sql
+git commit -m "Update shared demo seed from local database"
+git push
+```
+
+3. Teammates pull, then on a **fresh** volume (first time, or after `down -v`):
+
+```bash
+docker compose up -d
+cd backend && mvn spring-boot:run
+```
+
+They get the same seed rows. Uploaded PDF/DOCX files and `knowledge_chunk` embeddings are **not** exported (re-upload materials on each machine if needed).
 
 ## Knowledge embeddings
 
@@ -62,5 +97,6 @@ Passages are embedded with all-MiniLM-L6-v2 and stored as `vector(384)` in Postg
 ```
 frontend/   Next.js app (login + home)
 backend/    Spring Boot API (auth, users, embeddings)
+scripts/    db seed export helpers
 docker-compose.yml   PostgreSQL 16 + pgvector
 ```

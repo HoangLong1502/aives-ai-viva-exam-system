@@ -1,5 +1,6 @@
 -- AIVES schema: features 1 (question bank + rubric), 3 (AI viva core), 7 (administration).
 -- Compatibility columns kept for existing screens: question.source_ref, exam_session.format, exam_attempt.score.
+-- Applied once per Postgres volume by SchemaInitializer (see app_meta.seed_applied).
 CREATE EXTENSION IF NOT EXISTS vector;
 
 CREATE TABLE role (
