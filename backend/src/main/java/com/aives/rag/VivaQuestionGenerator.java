@@ -115,12 +115,19 @@ public class VivaQuestionGenerator {
         return Map.of(
                 "model", properties.ai().model(),
                 "temperature", 0.2,
-                "max_tokens", Math.min(2000, Math.max(400, count * 250)),
+                "max_tokens", Math.min(4000, Math.max(800, count * 450)),
                 "messages", List.of(
                         Map.of("role", "system", "content", """
-                                You write oral viva questions grounded only in the supplied passages.
-                                Return JSON with the shape {"questions":[{"prompt":"...","source":"filename, page 2"}]}.
-                                Each source must name the passage you used. Do not add facts that are not in the passages.
+                                You write oral viva questions for examiners, grounded ONLY in the supplied course passages.
+                                Every question must include a model answer and key points taken from those passages so an AI grader can mark student answers later.
+                                Return JSON only, with this shape:
+                                {"questions":[{"prompt":"...","source":"filename, page 2","expectedAnswer":"...","keyPoints":"point1; point2; point3"}]}
+                                Rules:
+                                - prompt: an oral viva question a student can answer aloud.
+                                - source: name the passage you used (title and page/section label).
+                                - expectedAnswer: a concise model answer in the same language as the passages, using only facts from that passage.
+                                - keyPoints: short grading checklist separated by ';', each point must appear in the passage.
+                                Do not invent facts that are not in the passages.
                                 """),
                         Map.of("role", "user", "content", user)
                 )

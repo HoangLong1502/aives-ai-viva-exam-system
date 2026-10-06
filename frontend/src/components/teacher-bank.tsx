@@ -37,6 +37,8 @@ type Question = {
   status: string;
   source: string;
   sourceRef: string | null;
+  expectedAnswer?: string | null;
+  keyPoints?: string | null;
 };
 
 const BLOOM = ["REMEMBER", "UNDERSTAND", "APPLY", "ANALYZE"] as const;

@@ -140,7 +140,7 @@ public class TeachingService {
             String rubricId
     ) {
         requireSubject(teacher.id(), subjectId);
-        return save(teacher.id(), subjectId, topic, prompt, bloom, rubricId, "APPROVED", "MANUAL", null, null);
+        return save(teacher.id(), subjectId, topic, prompt, bloom, rubricId, "APPROVED", "MANUAL", null, null, null, null);
     }
 
     public List<QuestionItem> importLines(
@@ -159,7 +159,7 @@ public class TeachingService {
             if (prompt.isEmpty()) {
                 continue;
             }
-            created.add(save(teacher.id(), subjectId, topic, prompt, bloom, rubricId, "APPROVED", "IMPORT", null, null));
+            created.add(save(teacher.id(), subjectId, topic, prompt, bloom, rubricId, "APPROVED", "IMPORT", null, null, null, null));
         }
         if (created.isEmpty()) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "Paste at least one question");
@@ -214,7 +214,9 @@ public class TeachingService {
                     "PENDING_REVIEW",
                     "AI",
                     draft.source(),
-                    generationId.toString()
+                    generationId.toString(),
+                    draft.expectedAnswer(),
+                    draft.keyPoints()
             ));
         }
         return created;
@@ -226,7 +228,9 @@ public class TeachingService {
             String prompt,
             String bloom,
             String status,
-            String topic
+            String topic,
+            String expectedAnswer,
+            String keyPoints
     ) {
         QuestionItem current = desk.question(id);
         if (current == null) {
@@ -241,7 +245,24 @@ public class TeachingService {
         if (nextTopic.isBlank() || prompt == null || prompt.isBlank()) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "Topic and prompt are required");
         }
-        desk.updateQuestion(id, nextTopic, prompt.trim(), bloom, status, reviewer.id());
+        String nextExpected = expectedAnswer == null ? current.expectedAnswer() : expectedAnswer.trim();
+        String nextKeyPoints = keyPoints == null ? current.keyPoints() : keyPoints.trim();
+        if (nextExpected != null && nextExpected.isBlank()) {
+            nextExpected = null;
+        }
+        if (nextKeyPoints != null && nextKeyPoints.isBlank()) {
+            nextKeyPoints = null;
+        }
+        desk.updateQuestion(
+                id,
+                nextTopic,
+                prompt.trim(),
+                bloom,
+                status,
+                reviewer.id(),
+                nextExpected,
+                nextKeyPoints
+        );
         return desk.question(id);
     }
 
@@ -297,7 +318,9 @@ public class TeachingService {
             String status,
             String source,
             String sourceRef,
-            String generationId
+            String generationId,
+            String expectedAnswer,
+            String keyPoints
     ) {
         if (prompt == null || prompt.isBlank() || topic == null || topic.isBlank()) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "Topic and prompt are required");
@@ -316,9 +339,18 @@ public class TeachingService {
                 source,
                 authorId,
                 sourceRef,
-                generationId
+                generationId,
+                blankToNull(expectedAnswer),
+                blankToNull(keyPoints)
         );
         return desk.question(id.toString());
+    }
+
+    private static String blankToNull(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return value.trim();
     }
 
     private void requireSubject(String teacherId, String subjectId) {

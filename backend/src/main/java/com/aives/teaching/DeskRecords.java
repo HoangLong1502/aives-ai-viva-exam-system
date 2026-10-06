@@ -48,7 +48,21 @@ public final class DeskRecords {
             String status,
             String source,
             String authorName,
-            String sourceRef
+            String sourceRef,
+            String expectedAnswer,
+            String keyPoints
+    ) {
+    }
+
+    /** Question payload for students sitting an exam — no model answers. */
+    public record ExamQuestionItem(
+            String id,
+            String topic,
+            String prompt,
+            String bloom,
+            String rubricName,
+            String criteria,
+            int maxScore
     ) {
     }
 
