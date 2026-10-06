@@ -301,20 +301,35 @@ public class JdbcDeskRepository {
         );
     }
 
-    public void updateQuestion(String id, String prompt, String bloom, String status, String reviewerId) {
+    public void updateQuestion(
+            String id,
+            String topic,
+            String prompt,
+            String bloom,
+            String status,
+            String reviewerId
+    ) {
         jdbc.update(
                 """
                 UPDATE question
-                SET prompt = ?, bloom_level = ?, status = ?, reviewed_by = ?::uuid, reviewed_at = now(),
+                SET topic = ?, prompt = ?, bloom_level = ?, status = ?, reviewed_by = ?::uuid, reviewed_at = now(),
                     updated_at = now()
                 WHERE id = ?::uuid
                 """,
+                topic,
                 prompt,
                 bloom,
                 status,
                 reviewerId,
                 id
         );
+    }
+
+    public void deleteQuestion(String id) {
+        jdbc.update("DELETE FROM question_source_chunk WHERE question_id = ?::uuid", id);
+        jdbc.update("DELETE FROM exam_session_question WHERE question_id = ?::uuid", id);
+        jdbc.update("UPDATE question_turn SET question_id = NULL WHERE question_id = ?::uuid", id);
+        jdbc.update("DELETE FROM question WHERE id = ?::uuid", id);
     }
 
     public QuestionItem question(String id) {

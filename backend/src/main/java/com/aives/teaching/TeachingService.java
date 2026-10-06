@@ -220,17 +220,38 @@ public class TeachingService {
         return created;
     }
 
-    public QuestionItem review(PublicUser reviewer, String id, String prompt, String bloom, String status) {
+    public QuestionItem review(
+            PublicUser reviewer,
+            String id,
+            String prompt,
+            String bloom,
+            String status,
+            String topic
+    ) {
         QuestionItem current = desk.question(id);
         if (current == null) {
             throw new ApiException(HttpStatus.NOT_FOUND, "Question not found");
         }
+        requireSubject(reviewer.id(), current.subjectId());
         requireBloom(bloom);
         if (!Set.of("PENDING_REVIEW", "APPROVED", "REJECTED").contains(status)) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "Unknown question status");
         }
-        desk.updateQuestion(id, prompt.trim(), bloom, status, reviewer.id());
+        String nextTopic = topic == null || topic.isBlank() ? current.topic() : topic.trim();
+        if (nextTopic.isBlank() || prompt == null || prompt.isBlank()) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Topic and prompt are required");
+        }
+        desk.updateQuestion(id, nextTopic, prompt.trim(), bloom, status, reviewer.id());
         return desk.question(id);
+    }
+
+    public void deleteQuestion(PublicUser teacher, String id) {
+        QuestionItem current = desk.question(id);
+        if (current == null) {
+            throw new ApiException(HttpStatus.NOT_FOUND, "Question not found");
+        }
+        requireSubject(teacher.id(), current.subjectId());
+        desk.deleteQuestion(id);
     }
 
     public void startExam(
