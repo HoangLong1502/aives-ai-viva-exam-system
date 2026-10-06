@@ -14,8 +14,10 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import java.util.List;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -24,6 +26,7 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -145,7 +148,23 @@ public class TeachingController {
             @PathVariable String id,
             @Valid @RequestBody ReviewRequest request
     ) {
-        return teaching.review(reviewer, id, request.prompt(), request.bloom(), request.status());
+        return teaching.review(
+                reviewer,
+                id,
+                request.prompt(),
+                request.bloom(),
+                request.status(),
+                request.topic()
+        );
+    }
+
+    @DeleteMapping("/questions/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteQuestion(
+            @AuthenticationPrincipal PublicUser teacher,
+            @PathVariable String id
+    ) {
+        teaching.deleteQuestion(teacher, id);
     }
 
     @PostMapping("/exams")
@@ -197,7 +216,12 @@ public class TeachingController {
     ) {
     }
 
-    public record ReviewRequest(@NotBlank String prompt, @NotBlank String bloom, @NotBlank String status) {
+    public record ReviewRequest(
+            @NotBlank String prompt,
+            @NotBlank String bloom,
+            @NotBlank String status,
+            String topic
+    ) {
     }
 
     public record StartExamRequest(

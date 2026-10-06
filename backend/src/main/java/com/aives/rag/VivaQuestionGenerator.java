@@ -11,6 +11,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestClientResponseException;
 
 @Service
 public class VivaQuestionGenerator {
@@ -47,13 +48,50 @@ public class VivaQuestionGenerator {
                     .uri(base + "/chat/completions")
                     .header("Authorization", "Bearer " + properties.ai().apiKey())
                     .header("Content-Type", "application/json")
+                    .header("HTTP-Referer", properties.frontendUrl())
+                    .header("X-Title", "AIVES")
                     .body(requestBody(topic, bloom, count, passages))
                     .retrieve()
                     .body(String.class);
+        } catch (RestClientResponseException exception) {
+            throw new ApiException(HttpStatus.BAD_GATEWAY, upstreamMessage(exception));
         } catch (RestClientException exception) {
-            throw new ApiException(HttpStatus.BAD_GATEWAY, "The AI API could not be reached");
+            throw new ApiException(
+                    HttpStatus.BAD_GATEWAY,
+                    "The AI API could not be reached. If using OpenRouter, set AI_BASE_URL=https://openrouter.ai/api/v1"
+            );
         }
         return GeneratedQuestionParser.parse(message(body), count, mapper);
+    }
+
+    private String upstreamMessage(RestClientResponseException exception) {
+        String responseBody = exception.getResponseBodyAsString();
+        if (responseBody != null && !responseBody.isBlank()) {
+            try {
+                JsonNode error = mapper.readTree(responseBody).path("error");
+                String detail = error.path("message").asText("").trim();
+                String code = error.path("code").asText("").trim();
+                if (!detail.isBlank()) {
+                    if ("credit_balance_exhausted".equals(code) || "insufficient_quota".equals(error.path("type").asText())) {
+                        return "AI provider has no credits remaining. Add billing credits, then try again.";
+                    }
+                    if (exception.getStatusCode().value() == 402) {
+                        return "AI provider needs credits or a free model (:free). " + detail;
+                    }
+                    return "AI API error: " + detail;
+                }
+            } catch (Exception ignored) {
+                // fall through to status-based message
+            }
+        }
+        int status = exception.getStatusCode().value();
+        if (status == 401 || status == 403) {
+            return "AI API rejected the API key. Check AI_API_KEY in backend/.env.";
+        }
+        if (status == 429) {
+            return "AI API rate limit or quota exceeded. Check OpenAI billing and try again.";
+        }
+        return "AI API returned HTTP " + status;
     }
 
     private Map<String, Object> requestBody(String topic, String bloom, int count, List<Passage> passages) {
@@ -77,6 +115,7 @@ public class VivaQuestionGenerator {
         return Map.of(
                 "model", properties.ai().model(),
                 "temperature", 0.2,
+                "max_tokens", Math.min(2000, Math.max(400, count * 250)),
                 "messages", List.of(
                         Map.of("role", "system", "content", """
                                 You write oral viva questions grounded only in the supplied passages.
