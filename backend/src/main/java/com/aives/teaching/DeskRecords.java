@@ -13,6 +13,27 @@ public final class DeskRecords {
     public record RubricItem(String id, String name, String criteria, int maxScore, String subjectId) {
     }
 
+    public record RubricCriterionItem(
+            String id,
+            String name,
+            String description,
+            double maxPoints,
+            int sortOrder
+    ) {
+    }
+
+    public record RubricDetailItem(
+            String id,
+            String name,
+            String description,
+            String subjectId,
+            String subjectCode,
+            String subjectName,
+            List<RubricCriterionItem> criteria,
+            int maxScore
+    ) {
+    }
+
     public record QuestionItem(
             String id,
             String subjectId,

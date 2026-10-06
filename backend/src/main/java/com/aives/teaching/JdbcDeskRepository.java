@@ -2,6 +2,8 @@ package com.aives.teaching;
 
 import com.aives.teaching.DeskRecords.AttemptItem;
 import com.aives.teaching.DeskRecords.QuestionItem;
+import com.aives.teaching.DeskRecords.RubricCriterionItem;
+import com.aives.teaching.DeskRecords.RubricDetailItem;
 import com.aives.teaching.DeskRecords.RubricItem;
 import com.aives.teaching.DeskRecords.SessionItem;
 import com.aives.teaching.DeskRecords.SpeechSettings;
@@ -140,6 +142,97 @@ public class JdbcDeskRepository {
                 courseId
         );
         return count != null && count > 0;
+    }
+
+    public boolean teacherOwnsRubric(String teacherId, String rubricId) {
+        Integer count = jdbc.queryForObject(
+                """
+                SELECT count(*) FROM rubric r
+                JOIN course_assignment ca ON ca.course_id = r.course_id AND ca.teacher_id = ?::uuid
+                WHERE r.id = ?::uuid
+                """,
+                Integer.class,
+                teacherId,
+                rubricId
+        );
+        return count != null && count > 0;
+    }
+
+    public RubricDetailItem rubricDetail(String rubricId) {
+        var header = jdbc.query(
+                """
+                SELECT r.id::text, r.name, COALESCE(r.description, ''), c.id::text, c.code, c.name
+                FROM rubric r
+                JOIN course c ON c.id = r.course_id
+                WHERE r.id = ?::uuid
+                """,
+                (rs, row) -> new Object[] {
+                        rs.getString(1),
+                        rs.getString(2),
+                        rs.getString(3),
+                        rs.getString(4),
+                        rs.getString(5),
+                        rs.getString(6),
+                },
+                rubricId
+        );
+        if (header.isEmpty()) {
+            return null;
+        }
+        Object[] values = header.getFirst();
+        List<RubricCriterionItem> criteria = jdbc.query(
+                """
+                SELECT id::text, name, COALESCE(description, ''), max_points, sort_order
+                FROM rubric_criterion
+                WHERE rubric_id = ?::uuid
+                ORDER BY sort_order, name
+                """,
+                (rs, row) -> new RubricCriterionItem(
+                        rs.getString(1),
+                        rs.getString(2),
+                        rs.getString(3),
+                        rs.getDouble(4),
+                        rs.getInt(5)
+                ),
+                rubricId
+        );
+        int maxScore = criteria.stream().mapToInt(c -> (int) Math.round(c.maxPoints())).sum();
+        return new RubricDetailItem(
+                (String) values[0],
+                (String) values[1],
+                (String) values[2],
+                (String) values[3],
+                (String) values[4],
+                (String) values[5],
+                criteria,
+                maxScore
+        );
+    }
+
+    @Transactional
+    public void updateRubric(String rubricId, String name, String description, List<RubricCriterionItem> criteria) {
+        jdbc.update(
+                "UPDATE rubric SET name = ?, description = ? WHERE id = ?::uuid",
+                name.trim(),
+                description == null ? "" : description.trim(),
+                rubricId
+        );
+        jdbc.update("DELETE FROM rubric_criterion WHERE rubric_id = ?::uuid", rubricId);
+        int order = 0;
+        for (RubricCriterionItem criterion : criteria) {
+            jdbc.update(
+                    """
+                    INSERT INTO rubric_criterion (id, rubric_id, name, description, max_points, sort_order)
+                    VALUES (?::uuid, ?::uuid, ?, ?, ?, ?)
+                    """,
+                    criterion.id(),
+                    rubricId,
+                    criterion.name().trim(),
+                    criterion.description() == null ? "" : criterion.description().trim(),
+                    criterion.maxPoints(),
+                    order++
+            );
+        }
     }
 
     public List<QuestionItem> questions(String status) {

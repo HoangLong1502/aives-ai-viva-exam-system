@@ -5,6 +5,8 @@ import com.aives.rag.DocumentIngestionService.IngestedDocument;
 import com.aives.rag.GeneratedQuestionParser.Draft;
 import com.aives.rag.VivaQuestionGenerator;
 import com.aives.teaching.DeskRecords.QuestionItem;
+import com.aives.teaching.DeskRecords.RubricCriterionItem;
+import com.aives.teaching.DeskRecords.RubricDetailItem;
 import com.aives.teaching.DeskRecords.RubricItem;
 import com.aives.teaching.DeskRecords.SubjectItem;
 import com.aives.user.PublicUser;
@@ -70,6 +72,59 @@ public class TeachingService {
 
     public List<RubricItem> rubrics(PublicUser teacher) {
         return desk.rubricsForTeacher(teacher.id());
+    }
+
+    public RubricDetailItem rubric(PublicUser teacher, String rubricId) {
+        if (!desk.teacherOwnsRubric(teacher.id(), rubricId)) {
+            throw new ApiException(HttpStatus.NOT_FOUND, "Rubric not found");
+        }
+        RubricDetailItem detail = desk.rubricDetail(rubricId);
+        if (detail == null) {
+            throw new ApiException(HttpStatus.NOT_FOUND, "Rubric not found");
+        }
+        return detail;
+    }
+
+    public RubricDetailItem updateRubric(
+            PublicUser teacher,
+            String rubricId,
+            String name,
+            String description,
+            List<RubricCriterionItem> criteria
+    ) {
+        if (!desk.teacherOwnsRubric(teacher.id(), rubricId)) {
+            throw new ApiException(HttpStatus.NOT_FOUND, "Rubric not found");
+        }
+        String trimmedName = name == null ? "" : name.trim();
+        if (trimmedName.isEmpty()) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Rubric name is required");
+        }
+        if (criteria == null || criteria.isEmpty()) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "At least one criterion is required");
+        }
+        List<RubricCriterionItem> normalized = new ArrayList<>();
+        int order = 0;
+        for (RubricCriterionItem criterion : criteria) {
+            String criterionName = criterion.name() == null ? "" : criterion.name().trim();
+            if (criterionName.isEmpty()) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "Each criterion needs a name");
+            }
+            if (criterion.maxPoints() <= 0) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "Each criterion needs a positive max score");
+            }
+            String id = criterion.id() == null || criterion.id().isBlank()
+                    ? UUID.randomUUID().toString()
+                    : criterion.id();
+            normalized.add(new RubricCriterionItem(
+                    id,
+                    criterionName,
+                    criterion.description() == null ? "" : criterion.description().trim(),
+                    criterion.maxPoints(),
+                    order++
+            ));
+        }
+        desk.updateRubric(rubricId, trimmedName, description, normalized);
+        return rubric(teacher, rubricId);
     }
 
     public List<QuestionItem> questions(String status) {
