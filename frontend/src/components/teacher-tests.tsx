@@ -32,6 +32,8 @@ type Question = {
   topic: string;
   source: string;
   sourceRef: string | null;
+  expectedAnswer: string | null;
+  keyPoints: string | null;
 };
 
 const BLOOM = ["REMEMBER", "UNDERSTAND", "APPLY", "ANALYZE"] as const;
@@ -433,9 +435,31 @@ export function TeacherTests() {
                     }
                     className="min-h-20 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
                   />
-                  <p className="text-xs text-muted-foreground">
-                    {question.sourceRef ?? question.source}
-                  </p>
+                  {(question.expectedAnswer || question.keyPoints) && (
+                    <div className="rounded-lg border border-dashed bg-muted/30 px-3 py-2 text-sm">
+                      <p className="text-xs font-medium text-muted-foreground">
+                        {t("teacher.common.gradingBasis")}
+                        {question.sourceRef ? ` · ${question.sourceRef}` : ""}
+                      </p>
+                      {question.expectedAnswer ? (
+                        <p className="mt-1">
+                          <span className="font-medium">{t("teacher.common.expectedAnswer")}: </span>
+                          {question.expectedAnswer}
+                        </p>
+                      ) : null}
+                      {question.keyPoints ? (
+                        <p className="mt-1 text-muted-foreground">
+                          <span className="font-medium text-foreground">{t("teacher.common.keyPoints")}: </span>
+                          {question.keyPoints}
+                        </p>
+                      ) : null}
+                    </div>
+                  )}
+                  {!question.expectedAnswer && !question.keyPoints ? (
+                    <p className="text-xs text-muted-foreground">
+                      {question.sourceRef ?? question.source}
+                    </p>
+                  ) : null}
                   <div className="flex gap-2">
                     <Button type="button" size="sm" onClick={() => void review(question, "APPROVED")}>
                       {t("teacher.common.approve")}

@@ -154,7 +154,9 @@ public class TeachingController {
                 request.prompt(),
                 request.bloom(),
                 request.status(),
-                request.topic()
+                request.topic(),
+                request.expectedAnswer(),
+                request.keyPoints()
         );
     }
 
@@ -220,7 +222,9 @@ public class TeachingController {
             @NotBlank String prompt,
             @NotBlank String bloom,
             @NotBlank String status,
-            String topic
+            String topic,
+            String expectedAnswer,
+            String keyPoints
     ) {
     }
 

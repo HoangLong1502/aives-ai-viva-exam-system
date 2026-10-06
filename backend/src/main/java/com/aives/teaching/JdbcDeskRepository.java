@@ -33,7 +33,7 @@ public class JdbcDeskRepository {
     private static final String QUESTION_SELECT = """
             SELECT q.id::text, q.course_id::text, c.name, q.topic, q.prompt, q.bloom_level,
                    q.rubric_id::text, r.name, %s, %s, q.status, q.source, u.full_name,
-                   q.source_ref
+                   q.source_ref, q.expected_answer, q.key_points
             FROM question q
             JOIN course c ON c.id = q.course_id
             JOIN rubric r ON r.id = q.rubric_id
@@ -253,14 +253,16 @@ public class JdbcDeskRepository {
             String source,
             String authorId,
             String sourceRef,
-            String generationId
+            String generationId,
+            String expectedAnswer,
+            String keyPoints
     ) {
         jdbc.update(
                 """
                 INSERT INTO question
                     (id, course_id, topic, prompt, bloom_level, rubric_id, status, source, author_id,
-                     source_ref, generation_id)
-                VALUES (?::uuid, ?::uuid, ?, ?, ?, ?::uuid, ?, ?, ?::uuid, ?, ?::uuid)
+                     source_ref, generation_id, expected_answer, key_points)
+                VALUES (?::uuid, ?::uuid, ?, ?, ?, ?::uuid, ?, ?, ?::uuid, ?, ?::uuid, ?, ?)
                 """,
                 id.toString(),
                 subjectId,
@@ -272,7 +274,9 @@ public class JdbcDeskRepository {
                 source,
                 authorId,
                 sourceRef,
-                generationId
+                generationId,
+                expectedAnswer,
+                keyPoints
         );
     }
 
@@ -307,13 +311,15 @@ public class JdbcDeskRepository {
             String prompt,
             String bloom,
             String status,
-            String reviewerId
+            String reviewerId,
+            String expectedAnswer,
+            String keyPoints
     ) {
         jdbc.update(
                 """
                 UPDATE question
                 SET topic = ?, prompt = ?, bloom_level = ?, status = ?, reviewed_by = ?::uuid, reviewed_at = now(),
-                    updated_at = now()
+                    expected_answer = ?, key_points = ?, updated_at = now()
                 WHERE id = ?::uuid
                 """,
                 topic,
@@ -321,6 +327,8 @@ public class JdbcDeskRepository {
                 bloom,
                 status,
                 reviewerId,
+                expectedAnswer,
+                keyPoints,
                 id
         );
     }
@@ -531,7 +539,9 @@ public class JdbcDeskRepository {
                 rs.getString(11),
                 rs.getString(12),
                 rs.getString(13),
-                rs.getString(14)
+                rs.getString(14),
+                rs.getString(15),
+                rs.getString(16)
         );
     }
 

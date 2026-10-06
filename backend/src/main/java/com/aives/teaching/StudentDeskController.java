@@ -1,6 +1,7 @@
 package com.aives.teaching;
 
 import com.aives.teaching.DeskRecords.AttemptItem;
+import com.aives.teaching.DeskRecords.ExamQuestionItem;
 import com.aives.teaching.DeskRecords.QuestionItem;
 import com.aives.teaching.DeskRecords.SessionItem;
 import com.aives.user.PublicUser;
@@ -34,12 +35,26 @@ public class StudentDeskController {
     }
 
     @GetMapping("/exams/{id}/questions")
-    public List<QuestionItem> questions(@PathVariable String id) {
-        return desk.questionsOnExam(id);
+    public List<ExamQuestionItem> questions(@PathVariable String id) {
+        return desk.questionsOnExam(id).stream()
+                .map(StudentDeskController::withoutAnswers)
+                .toList();
     }
 
     @GetMapping("/scores")
     public List<AttemptItem> scores(@AuthenticationPrincipal PublicUser student) {
         return desk.attemptsForStudent(student.id());
+    }
+
+    private static ExamQuestionItem withoutAnswers(QuestionItem question) {
+        return new ExamQuestionItem(
+                question.id(),
+                question.topic(),
+                question.prompt(),
+                question.bloom(),
+                question.rubricName(),
+                question.criteria(),
+                question.maxScore()
+        );
     }
 }
