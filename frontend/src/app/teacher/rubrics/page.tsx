@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { Loader2Icon } from "lucide-react";
-import { TeacherTests } from "@/components/teacher-tests";
+import { TeacherRubricsView } from "@/components/teacher/rubrics-view";
 
-export const metadata: Metadata = { title: "Start viva test" };
+export const metadata: Metadata = { title: "Rubrics" };
 
-function TestsFallback() {
+function RubricsFallback() {
   return (
     <div className="flex min-h-[40vh] items-center justify-center">
       <Loader2Icon className="size-6 animate-spin text-muted-foreground" />
@@ -13,10 +13,10 @@ function TestsFallback() {
   );
 }
 
-export default function TeacherTestsPage() {
+export default function TeacherRubricsPage() {
   return (
-    <Suspense fallback={<TestsFallback />}>
-      <TeacherTests />
+    <Suspense fallback={<RubricsFallback />}>
+      <TeacherRubricsView />
     </Suspense>
   );
 }

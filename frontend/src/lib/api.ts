@@ -49,15 +49,14 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
     | null;
 
   if (!response.ok) {
-    const message = Array.isArray(
-      payload && "message" in payload ? payload.message : undefined,
-    )
-      ? (payload as { message: string[] }).message[0]
-      : payload &&
-          typeof payload === "object" &&
-          "message" in payload &&
-          typeof payload.message === "string"
-        ? payload.message
+    const errorMessage =
+      payload !== null && typeof payload === "object" && "message" in payload
+        ? (payload as { message?: string | string[] }).message
+        : undefined;
+    const message = Array.isArray(errorMessage)
+      ? errorMessage[0]
+      : typeof errorMessage === "string"
+        ? errorMessage
         : "Something went wrong";
 
     if (response.status === 401) {
