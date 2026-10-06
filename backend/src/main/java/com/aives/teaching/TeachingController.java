@@ -3,6 +3,8 @@ package com.aives.teaching;
 import com.aives.rag.DocumentIngestionService.IngestedDocument;
 import com.aives.teaching.DeskRecords.AttemptItem;
 import com.aives.teaching.DeskRecords.QuestionItem;
+import com.aives.teaching.DeskRecords.RubricCriterionItem;
+import com.aives.teaching.DeskRecords.RubricDetailItem;
 import com.aives.teaching.DeskRecords.RubricItem;
 import com.aives.teaching.DeskRecords.SubjectItem;
 import com.aives.user.PublicUser;
@@ -18,6 +20,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -50,6 +53,23 @@ public class TeachingController {
     @GetMapping("/rubrics")
     public List<RubricItem> rubrics(@AuthenticationPrincipal PublicUser teacher) {
         return teaching.rubrics(teacher);
+    }
+
+    @GetMapping("/rubrics/{id}")
+    public RubricDetailItem rubric(
+            @AuthenticationPrincipal PublicUser teacher,
+            @PathVariable String id
+    ) {
+        return teaching.rubric(teacher, id);
+    }
+
+    @PutMapping("/rubrics/{id}")
+    public RubricDetailItem updateRubric(
+            @AuthenticationPrincipal PublicUser teacher,
+            @PathVariable String id,
+            @Valid @RequestBody UpdateRubricRequest request
+    ) {
+        return teaching.updateRubric(teacher, id, request.name(), request.description(), request.criteria());
     }
 
     @GetMapping("/documents")
@@ -189,5 +209,12 @@ public class TeachingController {
     }
 
     public record ScoreRequest(int score) {
+    }
+
+    public record UpdateRubricRequest(
+            @NotBlank String name,
+            String description,
+            @NotNull List<RubricCriterionItem> criteria
+    ) {
     }
 }
