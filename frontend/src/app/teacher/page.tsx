@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
-import { TeacherBank } from "@/components/teacher-bank";
+import { TeacherOverviewView } from "@/components/teacher/overview-view";
 
-export const metadata: Metadata = { title: "Question bank & rubric" };
+export const metadata: Metadata = { title: "Overview" };
 
 export default function TeacherPage() {
-  return <TeacherBank />;
+  return <TeacherOverviewView />;
 }
