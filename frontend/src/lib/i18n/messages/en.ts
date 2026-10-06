@@ -1,4 +1,36 @@
 export const en = {
+  history: {
+    title: "Exam History",
+    subtitle: "Review your past test attempts and detailed results",
+    search_placeholder: "Search test name...",
+    table: {
+      test_name: "Test Name",
+      date: "Date Taken",
+      score: "Score",
+      duration: "Duration",
+      status: "Status",
+      note: "Personal Note",
+      actions: "Actions",
+    },
+    status: {
+      completed: "Completed",
+      in_progress: "In Progress",
+    },
+    actions: {
+      view: "View Details",
+      edit_note: "Edit Note",
+      delete: "Delete History",
+      save: "Save Changes",
+      cancel: "Cancel",
+      confirm_delete: "Are you sure you want to delete this practice attempt?",
+    },
+    modal: {
+      detail_title: "Test Result Details",
+      edit_title: "Update Attempt Note",
+      total_questions: "Total Questions",
+      correct_answers: "Correct Answers",
+    },
+  },
   common: {
     signOut: "Sign out",
     home: "Home",
@@ -26,6 +58,8 @@ export const en = {
     student: {
       tests: "Tests",
       scores: "Scores",
+      profile: "My Profile",
+      history: "Exam History",
     },
     admin: {
       dashboard: "Dashboard",
@@ -330,10 +364,10 @@ export const en = {
 
 type DeepString<T> = {
   [K in keyof T]: T[K] extends string
-    ? string
-    : T[K] extends readonly string[]
-      ? readonly string[]
-      : DeepString<T[K]>;
+  ? string
+  : T[K] extends readonly string[]
+  ? readonly string[]
+  : DeepString<T[K]>;
 };
 
 export type Messages = DeepString<typeof en>;

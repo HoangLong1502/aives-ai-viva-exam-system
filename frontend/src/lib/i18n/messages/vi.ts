@@ -1,6 +1,38 @@
 import type { Messages } from "./en";
 
 export const vi: Messages = {
+  history: {
+    title: "Lịch sử làm bài",
+    subtitle: "Xem lại danh sách các bài thi đã thực hiện và kết quả chi tiết",
+    search_placeholder: "Tìm kiếm tên bài thi...",
+    table: {
+      test_name: "Tên bài thi",
+      date: "Ngày làm",
+      score: "Điểm số",
+      duration: "Thời gian",
+      status: "Trạng thái",
+      note: "Ghi chú cá nhân",
+      actions: "Thao tác",
+    },
+    status: {
+      completed: "Đã hoàn thành",
+      in_progress: "Chưa hoàn thành",
+    },
+    actions: {
+      view: "Xem chi tiết",
+      edit_note: "Sửa ghi chú",
+      delete: "Xóa lịch sử",
+      save: "Lưu thay đổi",
+      cancel: "Hủy",
+      confirm_delete: "Bạn có chắc chắn muốn xóa lượt thi nháp/thử này không?",
+    },
+    modal: {
+      detail_title: "Chi tiết kết quả bài thi",
+      edit_title: "Cập nhật ghi chú bài thi",
+      total_questions: "Tổng số câu",
+      correct_answers: "Số câu đúng",
+    },
+  },
   common: {
     signOut: "Đăng xuất",
     home: "Trang chủ",
@@ -28,6 +60,8 @@ export const vi: Messages = {
     student: {
       tests: "Bài kiểm tra",
       scores: "Điểm số",
+      profile: "Hồ sơ cá nhân",
+      history: "Lịch sử bài làm",
     },
     admin: {
       dashboard: "Tổng quan",
