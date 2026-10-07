@@ -10,6 +10,8 @@ export function StudentLayoutClient({ children }: { children: ReactNode }) {
     () => [
       { href: "/student", label: t("nav.student.tests"), exact: true },
       { href: "/student/scores", label: t("nav.student.scores") },
+      { href: "/student/profile", label: t("nav.student.profile") },
+      { href: "/student/history", label: t("nav.student.history") },
     ],
     [t],
   );
