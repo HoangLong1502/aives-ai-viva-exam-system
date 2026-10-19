@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Loader2Icon } from "lucide-react";
 import { toast } from "sonner";
 import { StatusBadge, attemptStatusVariant } from "@/components/teacher/status-badge";
@@ -25,11 +25,15 @@ export function ScoreTable({
   canGrade = false,
   search = "",
   needsGradingOnly = false,
+  statusFilter = "",
+  toolbar,
 }: {
   path: string;
   canGrade?: boolean;
   search?: string;
   needsGradingOnly?: boolean;
+  statusFilter?: string;
+  toolbar?: ReactNode;
 }) {
   const { t, messages } = useLocale();
   const labels = messages.teacher.labels;
@@ -58,7 +62,7 @@ export function ScoreTable({
             ? error.message
             : canGrade
               ? t("teacher.scores.loadError")
-              : "Could not load scores.",
+              : t("teacher.scores.loadError"),
         );
       })
       .finally(() => {
@@ -73,13 +77,13 @@ export function ScoreTable({
     const query = search.trim().toLowerCase();
     return rows.filter((row) => {
       if (needsGradingOnly && row.score != null) return false;
+      if (statusFilter && row.status !== statusFilter) return false;
       if (!query) return true;
-      return (
-        row.examTitle.toLowerCase().includes(query) ||
-        row.studentName.toLowerCase().includes(query)
-      );
+      const fields = [row.examTitle, row.studentName];
+      if (!canGrade) fields.push(row.teacherName);
+      return fields.some((field) => field.toLowerCase().includes(query));
     });
-  }, [rows, search, needsGradingOnly]);
+  }, [rows, search, needsGradingOnly, statusFilter, canGrade]);
 
   async function save(id: string) {
     const score = Number(drafts[id]);
@@ -94,7 +98,7 @@ export function ScoreTable({
         auth: true,
         body: { score },
       });
-      toast.success(canGrade ? t("teacher.scores.saved") : "Score saved.");
+      toast.success(t("teacher.scores.saved"));
       const next = await api<Attempt[]>(path, { auth: true });
       applyRows(next);
     } catch (error) {
@@ -106,7 +110,8 @@ export function ScoreTable({
 
   if (loading) {
     return (
-      <Card>
+      <Card className="min-w-0">
+        {toolbar ? <div className="border-b px-4 pb-4">{toolbar}</div> : null}
         <CardContent className="flex justify-center py-12">
           <Loader2Icon className="size-6 animate-spin text-muted-foreground" aria-label={t("teacher.common.loading")} />
         </CardContent>
@@ -115,14 +120,15 @@ export function ScoreTable({
   }
 
   return (
-    <Card>
+    <Card className="min-w-0">
       <CardContent className="p-0">
+        {toolbar ? <div className="border-b px-4 pb-4">{toolbar}</div> : null}
         {rows.length === 0 ? (
-          <p className="px-6 py-10 text-center text-sm text-muted-foreground">
-            {canGrade ? t("teacher.scores.empty") : "No scores yet."}
+          <p className="px-4 py-10 text-center text-sm text-muted-foreground">
+            {t("teacher.scores.empty")}
           </p>
         ) : filtered.length === 0 ? (
-          <p className="px-6 py-10 text-center text-sm text-muted-foreground">
+          <p className="px-4 py-10 text-center text-sm text-muted-foreground">
             {t("teacher.common.noResults")}
           </p>
         ) : (
@@ -130,7 +136,7 @@ export function ScoreTable({
             {filtered.map((row) => (
               <li
                 key={row.id}
-                className="flex flex-col gap-3 px-6 py-4 sm:flex-row sm:items-center sm:justify-between"
+                className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between"
               >
                 <div className="space-y-1">
                   <p className="font-medium">{row.examTitle}</p>

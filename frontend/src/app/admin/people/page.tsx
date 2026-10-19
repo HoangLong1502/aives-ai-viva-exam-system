@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
-import { AdminPeople } from "@/components/admin-people";
+import { AdminPeople } from "@/components/admin/people/admin-people";
 
 export const metadata: Metadata = {
-  title: "People",
+  title: "Accounts",
 };
 
 export default function AdminPeoplePage() {

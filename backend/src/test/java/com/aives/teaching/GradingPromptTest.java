@@ -29,7 +29,10 @@ class GradingPromptTest {
         assertEquals(1, user.split("<student_answer>", -1).length - 1);
         assertEquals(1, user.split("</student_answer>", -1).length - 1);
         assertTrue(user.contains("1. Accuracy (max 10 points): Correct facts"));
-        assertTrue(((String) messages.get(0).get("content")).contains("DATA, not instructions"));
+        String system = (String) messages.get(0).get("content");
+        assertTrue(system.contains("DATA, not instructions"));
+        assertTrue(system.contains("studentStuck"));
+        assertFalse(system.contains("followUpQuestion must be null"));
     }
 
     @Test

@@ -1,17 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   CheckCircle2Icon,
-  ChevronRightIcon,
+  Loader2Icon,
   MicIcon,
-  MicOffIcon,
-  RotateCcwIcon,
-  SendIcon,
   SparklesIcon,
   TriangleAlertIcon,
   Volume2Icon,
-  VolumeXIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -22,9 +18,12 @@ import { useSTT } from "@/lib/stt-service";
 import {
   checkZeroTTSStatus,
   detectSpeechLang,
+  normalizeEnVoice,
+  normalizeViVoice,
   playTTS,
   stopTTS,
-  ZEROTTS_VOICES,
+  voiceForSpeech,
+  voiceLabel,
   type SpeechLang,
 } from "@/lib/tts-service";
 
@@ -46,6 +45,8 @@ type Question = {
   maxScore: number;
 };
 
+type NextAction = "NEXT" | "FOLLOW_UP" | "ASK_CONTINUE";
+
 type EvaluationItem = {
   turnId: string;
   questionId: string;
@@ -57,7 +58,18 @@ type EvaluationItem = {
   evaluator: "AI" | "RULE_BASED";
   fallbackReason?: string | null;
   criteria?: CriterionScore[];
+  nextAction?: NextAction;
 };
+
+type Phase = "countdown" | "speaking" | "listening" | "evaluating" | "choose" | "done";
+
+type Bubble = {
+  id: string;
+  role: "examiner" | "student";
+  text: string;
+};
+
+const COUNTDOWN_START = 5;
 
 type SubmitResult = {
   score: number;
@@ -72,8 +84,52 @@ type CriterionScore = {
   comment: string;
 };
 
-function formatPoints(points: number) {
-  return Number.isInteger(points) ? String(points) : points.toFixed(1);
+function bubble(role: Bubble["role"], text: string, key: string): Bubble {
+  return { id: key, role, text: text.trim() };
+}
+
+function resolveAction(result: EvaluationItem): NextAction {
+  if (
+    result.nextAction === "NEXT" ||
+    result.nextAction === "FOLLOW_UP" ||
+    result.nextAction === "ASK_CONTINUE"
+  ) {
+    return result.nextAction;
+  }
+  if (result.score >= 100) return "NEXT";
+  if (result.followUpQuestion) return "FOLLOW_UP";
+  return "ASK_CONTINUE";
+}
+
+function interpretChoice(raw: string): "continue" | "next" | null {
+  const text = raw.toLowerCase().normalize("NFC").replace(/\s+/g, " ").trim();
+  if (!text) return null;
+  const wantsNext =
+    /(câu tiếp|câu mới|qua câu|chuyển câu|câu khác|next question|move on|\bskip\b|\bnext\b)/.test(text);
+  const wantsContinue = /(trả lời tiếp|tiếp tục|câu này|nói tiếp|keep going|\bcontinue\b)/.test(text);
+  if (wantsNext && !wantsContinue) return "next";
+  if (wantsContinue && !wantsNext) return "continue";
+  if (/^(qua|next|skip|không|no)$/.test(text)) return "next";
+  if (/^(tiếp|có|yes|ok|okay)$/.test(text)) return "continue";
+  return null;
+}
+
+function speakLine(text: string, viVoice: string, enVoice: string) {
+  return new Promise<void>((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    const lang = detectSpeechLang(text);
+    void playTTS(text, {
+      voice: voiceForSpeech(lang, viVoice, enVoice),
+      lang,
+      onEnd: finish,
+      onError: finish,
+    });
+  });
 }
 
 export function StudentTests() {
@@ -186,164 +242,207 @@ function VivaExamRoom({
   const { t } = useLocale();
   const [currentIndex, setCurrentIndex] = useState(0);
   const [activeVoice, setActiveVoice] = useState("maichi");
+  const [activeEnVoice, setActiveEnVoice] = useState("maichi");
+  const [voiceReady, setVoiceReady] = useState(false);
   const [isZeroTTSOnline, setIsZeroTTSOnline] = useState<boolean | null>(null);
-  const [isSpeaking, setIsSpeaking] = useState(false);
   const [evaluations, setEvaluations] = useState<Record<string, EvaluationItem>>({});
-  const [evaluating, setEvaluating] = useState(false);
   const [submittingExam, setSubmittingExam] = useState(false);
-
-  // Follow-up state
-  const [followUpAnswer, setFollowUpAnswer] = useState("");
-  const [evaluatingFollowUp, setEvaluatingFollowUp] = useState(false);
+  const [phase, setPhase] = useState<Phase>("countdown");
+  const [countdown, setCountdown] = useState(COUNTDOWN_START);
+  const [followUpPrompt, setFollowUpPrompt] = useState<string | null>(null);
+  const [bubbles, setBubbles] = useState<Bubble[]>(() =>
+    questions[0] ? [bubble("examiner", questions[0].prompt, `q-${questions[0].id}`)] : [],
+  );
+  const [trackedIndex, setTrackedIndex] = useState(currentIndex);
 
   const currentQuestion = questions[currentIndex];
+  if (currentQuestion && trackedIndex !== currentIndex) {
+    setTrackedIndex(currentIndex);
+    setFollowUpPrompt(null);
+    setBubbles([bubble("examiner", currentQuestion.prompt, `q-${currentQuestion.id}`)]);
+    setCountdown(COUNTDOWN_START);
+    setPhase("countdown");
+  }
   const currentEvaluation = currentQuestion ? evaluations[currentQuestion.id] : undefined;
-  const speechLang: SpeechLang = detectSpeechLang(
-    currentEvaluation?.followUpQuestion || currentQuestion?.prompt || ""
-  );
+  const speechLang: SpeechLang = detectSpeechLang(followUpPrompt || currentQuestion?.prompt || "");
+  const { isListening, transcript, startListening, stopListening, resetTranscript, isSupported, error: sttError } =
+    useSTT({ lang: speechLang });
 
-  const {
-    isListening,
-    transcript,
-    setTranscript,
-    startListening,
-    stopListening,
-    resetTranscript,
-    error: sttError,
-  } = useSTT({ lang: speechLang });
+  const runRef = useRef(0);
+  const phaseRef = useRef<Phase>(phase);
+  const indexRef = useRef(currentIndex);
+  const voiceRef = useRef(activeVoice);
+  const enVoiceRef = useRef(activeEnVoice);
+  const transcriptRef = useRef(transcript);
+  const followUpRef = useRef<string | null>(followUpPrompt);
+  const parentTurnRef = useRef<string | null>(null);
+  const submittingRef = useRef(false);
+  const finishingRef = useRef(false);
+  const mountedRef = useRef(true);
+  const listenStartedRef = useRef(0);
+  const countdownSpokenRef = useRef<number | null>(null);
+  const bubbleSeq = useRef(0);
+  const dialogueRef = useRef<HTMLDivElement>(null);
+  const startListeningRef = useRef(startListening);
+  const stopListeningRef = useRef(stopListening);
+  const resetTranscriptRef = useRef(resetTranscript);
+  const tRef = useRef(t);
+
+  useEffect(() => {
+    startListeningRef.current = startListening;
+    stopListeningRef.current = stopListening;
+    resetTranscriptRef.current = resetTranscript;
+  }, [startListening, stopListening, resetTranscript]);
+
+  useEffect(() => {
+    phaseRef.current = phase;
+    indexRef.current = currentIndex;
+    voiceRef.current = activeVoice;
+    enVoiceRef.current = activeEnVoice;
+    transcriptRef.current = transcript;
+    followUpRef.current = followUpPrompt;
+    tRef.current = t;
+  }, [phase, currentIndex, activeVoice, activeEnVoice, transcript, followUpPrompt, t]);
+
+  const setExamPhase = useCallback((next: Phase) => {
+    phaseRef.current = next;
+    setPhase(next);
+  }, []);
+
+  const pushBubble = useCallback((role: Bubble["role"], text: string) => {
+    const clean = text.trim();
+    if (!clean) return;
+    bubbleSeq.current += 1;
+    const id = `b-${bubbleSeq.current}`;
+    setBubbles((prev) => {
+      const last = prev[prev.length - 1];
+      if (last && last.role === role && last.text === clean) return prev;
+      return [...prev, bubble(role, clean, id)];
+    });
+  }, []);
+
+  const beginAfterSpeech = useCallback((run: number, after: "listen" | "choose") => {
+    if (!mountedRef.current || run !== runRef.current) return;
+    submittingRef.current = false;
+    resetTranscriptRef.current();
+    listenStartedRef.current = Date.now();
+    setExamPhase(after === "listen" ? "listening" : "choose");
+    startListeningRef.current();
+  }, [setExamPhase]);
+
+  const speakThenListen = useCallback((text: string, after: "listen" | "choose") => {
+    const run = ++runRef.current;
+    stopListeningRef.current();
+    setExamPhase("speaking");
+    const lang = detectSpeechLang(text);
+    void playTTS(text, {
+      voice: voiceForSpeech(lang, voiceRef.current, enVoiceRef.current),
+      lang,
+      onEnd: () => beginAfterSpeech(run, after),
+      onError: () => beginAfterSpeech(run, after),
+    });
+  }, [beginAfterSpeech, setExamPhase]);
+
+  const speakThenListenRef = useRef(speakThenListen);
+  useEffect(() => {
+    speakThenListenRef.current = speakThenListen;
+  }, [speakThenListen]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
     checkZeroTTSStatus().then((online) => {
       if (!cancelled) setIsZeroTTSOnline(online);
     });
+    api<{ ttsVoice?: string; ttsVoiceEn?: string }>("/api/student/speech", { auth: true })
+      .then((settings) => {
+        if (cancelled) return;
+        setActiveVoice(normalizeViVoice(settings.ttsVoice));
+        setActiveEnVoice(normalizeEnVoice(settings.ttsVoiceEn));
+        setVoiceReady(true);
+      })
+      .catch(() => {
+        if (!cancelled) setVoiceReady(true);
+      });
     return () => {
       cancelled = true;
-      stopTTS();
     };
   }, []);
 
-  function handleSpeak(text: string) {
-    if (isSpeaking) {
+  useEffect(() => {
+    if (phase !== "countdown" || !navigator.mediaDevices?.getUserMedia) return;
+    let cancelled = false;
+    let stream: MediaStream | null = null;
+    navigator.mediaDevices
+      .getUserMedia({ audio: true })
+      .then((next) => {
+        if (cancelled) {
+          next.getTracks().forEach((track) => track.stop());
+          return;
+        }
+        stream = next;
+        next.getTracks().forEach((track) => track.stop());
+      })
+      .catch(() => {
+        // Speech recognition will surface the permission error when listening starts.
+      });
+    return () => {
+      cancelled = true;
+      stream?.getTracks().forEach((track) => track.stop());
+    };
+  }, [phase, currentIndex]);
+
+  useEffect(() => {
+    runRef.current += 1;
+    parentTurnRef.current = null;
+    followUpRef.current = null;
+    submittingRef.current = false;
+    countdownSpokenRef.current = null;
+    stopTTS();
+    stopListening();
+    resetTranscript();
+    return () => {
+      runRef.current += 1;
       stopTTS();
-      setIsSpeaking(false);
-      return;
+      stopListening();
+    };
+  }, [currentIndex, stopListening, resetTranscript]);
+
+  useEffect(() => {
+    if (phase !== "countdown") return;
+    if (countdown > 0) {
+      const id = window.setTimeout(() => setCountdown((value) => value - 1), 1000);
+      return () => window.clearTimeout(id);
     }
+    const question = questions[currentIndex];
+    if (!question || countdownSpokenRef.current === currentIndex) return;
+    countdownSpokenRef.current = currentIndex;
+    speakThenListenRef.current(question.prompt, "listen");
+  }, [phase, countdown, currentIndex, questions]);
 
-    const lang = detectSpeechLang(text);
-    setIsSpeaking(true);
-    playTTS(text, {
-      voice: activeVoice,
-      lang,
-      onStart: () => setIsSpeaking(true),
-      onEnd: () => setIsSpeaking(false),
-      onError: () => setIsSpeaking(false),
-    });
-  }
+  useEffect(() => {
+    dialogueRef.current?.scrollTo({ top: dialogueRef.current.scrollHeight });
+  }, [bubbles, transcript, phase]);
 
-  async function handleSendAnswer() {
-    if (!currentQuestion) return;
-    const answerText = transcript.trim();
-    if (!answerText) {
-      toast.error("Vui lòng nói câu trả lời trước khi gửi!");
-      return;
-    }
-
-    stopListening();
-    setEvaluating(true);
-
-    try {
-      const result = await api<EvaluationItem>(
-        `/api/student/exams/${session.id}/questions/${currentQuestion.id}/answer`,
-        {
-          method: "POST",
-          auth: true,
-          body: { answer: answerText, durationMs: 15000 },
-        }
-      );
-
-      setEvaluations((prev) => ({ ...prev, [currentQuestion.id]: result }));
-      if (result.evaluator === "RULE_BASED") {
-        toast.warning(t("student.tests.ruleBasedToast"));
-      } else {
-        toast.success("AI đã đánh giá câu trả lời của bạn.");
-      }
-
-      // Nếu có câu hỏi phụ, tự động phát âm thanh câu hỏi phụ!
-      if (result.followUpQuestion) {
-        setTimeout(() => {
-          const followUpLang = detectSpeechLang(result.followUpQuestion || currentQuestion.prompt);
-          const lead =
-            followUpLang === "en-US"
-              ? "You covered part of it. "
-              : "Bạn đã trả lời được một phần. ";
-          handleSpeak(lead + result.followUpQuestion);
-        }, 500);
-      }
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Không thể gửi câu trả lời.");
-    } finally {
-      setEvaluating(false);
-    }
-  }
-
-  async function handleSendFollowUp() {
-    if (!currentQuestion || !currentEvaluation?.turnId) return;
-    const answerText = (isListening ? transcript : followUpAnswer).trim();
-    if (!answerText) {
-      toast.error("Vui lòng nói hoặc nhập câu trả lời cho câu hỏi phụ!");
-      return;
-    }
-
-    stopListening();
-    setEvaluatingFollowUp(true);
-
-    try {
-      const result = await api<EvaluationItem>(
-        `/api/student/exams/${session.id}/turns/${currentEvaluation.turnId}/answer`,
-        {
-          method: "POST",
-          auth: true,
-          body: { answer: answerText, durationMs: 10000 },
-        }
-      );
-
-      // Cập nhật lại evaluation
-      setEvaluations((prev) => ({
-        ...prev,
-        [currentQuestion.id]: {
-          ...result,
-          followUpQuestion: null, // Đã hoàn thành câu hỏi phụ
-        },
-      }));
-
-      setFollowUpAnswer("");
-      resetTranscript();
-      toast.success("Đã ghi nhận câu trả lời bổ sung!");
-
-      handleSpeak(
-        detectSpeechLang(currentQuestion.prompt) === "en-US"
-          ? "Thank you. Your follow-up answer has been recorded."
-          : "Cảm ơn bạn. Câu trả lời bổ sung đã được ghi nhận."
-      );
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Không thể gửi câu trả lời phụ.");
-    } finally {
-      setEvaluatingFollowUp(false);
-    }
-  }
-
-  async function handleFinishExam() {
+  const finishExam = useCallback(async () => {
+    if (finishingRef.current) return;
+    finishingRef.current = true;
     setSubmittingExam(true);
+    stopListeningRef.current();
+    stopTTS();
     try {
-      // Điểm cuối cùng do server tính từ các câu trả lời đã lưu.
       const result = await api<SubmitResult>(`/api/student/exams/${session.id}/submit`, {
         method: "POST",
         auth: true,
       });
-
       toast.success(
-        t("student.tests.examFinishedWithScore", {
+        tRef.current("student.tests.examFinishedWithScore", {
           score: String(result.score),
           answered: String(result.answeredQuestions),
           total: String(result.totalQuestions),
@@ -351,18 +450,166 @@ function VivaExamRoom({
       );
       onComplete();
     } catch (err) {
+      finishingRef.current = false;
+      if (!mountedRef.current) return;
       toast.error(err instanceof ApiError ? err.message : "Lỗi khi nộp bài thi.");
+      setExamPhase("done");
     } finally {
       setSubmittingExam(false);
     }
+  }, [onComplete, session.id, setExamPhase]);
+
+  const submitAnswer = useCallback(async (raw: string) => {
+    if (submittingRef.current || phaseRef.current !== "listening") return;
+    const question = questions[indexRef.current];
+    if (!question) return;
+    const answer = raw.trim();
+    submittingRef.current = true;
+    runRef.current += 1;
+    stopListeningRef.current();
+    stopTTS();
+    setExamPhase("evaluating");
+
+    const parent = parentTurnRef.current;
+    const path = parent
+      ? `/api/student/exams/${session.id}/turns/${parent}/answer`
+      : `/api/student/exams/${session.id}/questions/${question.id}/answer`;
+
+    try {
+      const result = await api<EvaluationItem>(path, {
+        method: "POST",
+        auth: true,
+        body: {
+          answer,
+          durationMs: Math.max(0, Date.now() - listenStartedRef.current),
+          followUpQuestion: followUpRef.current,
+        },
+      });
+      if (!mountedRef.current) return;
+      parentTurnRef.current = result.turnId;
+      setEvaluations((prev) => ({ ...prev, [question.id]: result }));
+      if (result.evaluator === "RULE_BASED") {
+        toast.warning(tRef.current("student.tests.ruleBasedToast"));
+      }
+      if (answer) pushBubble("student", answer);
+      if (result.feedback) pushBubble("examiner", result.feedback);
+
+      const action = resolveAction(result);
+      if (action === "NEXT") {
+        const last = indexRef.current >= questions.length - 1;
+        const bridgeKey =
+          result.score >= 100
+            ? last
+              ? "student.tests.perfectDone"
+              : "student.tests.perfectMove"
+            : last
+              ? "student.tests.recordedDone"
+              : "student.tests.recordedMove";
+        const bridge = tRef.current(bridgeKey);
+        pushBubble("examiner", bridge);
+        setExamPhase("speaking");
+        await speakLine(
+          [result.feedback, bridge].filter(Boolean).join(" "),
+          voiceRef.current,
+          enVoiceRef.current,
+        );
+        if (!mountedRef.current) return;
+        if (last) await finishExam();
+        else setCurrentIndex((value) => Math.min(questions.length - 1, value + 1));
+        return;
+      }
+
+      if (action === "FOLLOW_UP" && result.followUpQuestion) {
+        followUpRef.current = result.followUpQuestion;
+        setFollowUpPrompt(result.followUpQuestion);
+        pushBubble("examiner", result.followUpQuestion);
+        const spoken = [result.feedback, result.followUpQuestion].filter((part) => part && part.trim()).join(" ");
+        speakThenListenRef.current(spoken, "listen");
+        return;
+      }
+
+      const choice = tRef.current("student.tests.choosePrompt");
+      pushBubble("examiner", choice);
+      speakThenListenRef.current([result.feedback, choice].filter(Boolean).join(" "), "choose");
+    } catch (err) {
+      if (!mountedRef.current) return;
+      toast.error(err instanceof ApiError ? err.message : "Không thể gửi câu trả lời.");
+      listenStartedRef.current = Date.now();
+      setExamPhase("listening");
+      startListeningRef.current();
+    } finally {
+      submittingRef.current = false;
+    }
+  }, [finishExam, pushBubble, questions, session.id, setExamPhase]);
+
+  const submitRef = useRef(submitAnswer);
+  useEffect(() => {
+    submitRef.current = submitAnswer;
+  }, [submitAnswer]);
+
+  const continueQuestion = useCallback(() => {
+    if (phaseRef.current !== "choose") return;
+    const question = questions[indexRef.current];
+    if (!question) return;
+    const prompt = followUpRef.current || question.prompt;
+    pushBubble("examiner", prompt);
+    speakThenListen(prompt, "listen");
+  }, [pushBubble, questions, speakThenListen]);
+
+  const skipQuestion = useCallback(() => {
+    if (phaseRef.current === "evaluating" || phaseRef.current === "countdown") return;
+    runRef.current += 1;
+    submittingRef.current = false;
+    stopListeningRef.current();
+    stopTTS();
+    resetTranscriptRef.current();
+    if (indexRef.current >= questions.length - 1) {
+      void finishExam();
+      return;
+    }
+    setCurrentIndex((value) => Math.min(questions.length - 1, value + 1));
+  }, [finishExam, questions.length]);
+
+  const continueRef = useRef(continueQuestion);
+  const skipRef = useRef(skipQuestion);
+  useEffect(() => {
+    continueRef.current = continueQuestion;
+    skipRef.current = skipQuestion;
+  }, [continueQuestion, skipQuestion]);
+
+  useEffect(() => {
+    if (phase !== "choose") return;
+    if (transcript.trim().length < 2) return;
+    const id = window.setTimeout(() => {
+      if (phaseRef.current !== "choose") return;
+      const choice = interpretChoice(transcriptRef.current);
+      if (choice === "continue") continueRef.current();
+      else if (choice === "next") skipRef.current();
+      else toast.message(tRef.current("student.tests.chooseUnclear"));
+    }, 1200);
+    return () => window.clearTimeout(id);
+  }, [phase, transcript]);
+
+  function replay() {
+    if (!currentQuestion || phase === "evaluating" || phase === "countdown") return;
+    const text = followUpPrompt || currentQuestion.prompt;
+    speakThenListen(text, phase === "choose" ? "choose" : "listen");
   }
 
-  if (questions.length === 0) {
+  function leave() {
+    mountedRef.current = false;
+    runRef.current += 1;
+    stopTTS();
+    stopListening();
+    onClose();
+  }
+
+  if (questions.length === 0 || !currentQuestion) {
     return (
       <Card>
         <CardContent className="space-y-4 p-8 text-center">
           <p className="text-muted-foreground">{t("student.tests.noQuestions")}</p>
-          <Button variant="outline" onClick={onClose}>
+          <Button variant="outline" onClick={leave}>
             Quay lại
           </Button>
         </CardContent>
@@ -370,11 +617,21 @@ function VivaExamRoom({
     );
   }
 
-  const isLastQuestion = currentIndex === questions.length - 1;
+  const status =
+    phase === "countdown"
+      ? t("student.tests.countdown", { seconds: String(Math.max(countdown, 1)) })
+      : phase === "speaking"
+        ? t("student.tests.examinerSpeaking")
+        : phase === "listening"
+          ? t("student.tests.listening")
+          : phase === "evaluating"
+            ? t("student.tests.thinking")
+            : phase === "choose"
+              ? t("student.tests.choosePrompt")
+              : t("student.tests.finishExam");
 
   return (
     <div className="space-y-6">
-      {/* Thanh điều khiển trên cùng */}
       <div className="flex flex-col gap-3 rounded-xl border bg-muted/30 p-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="font-serif text-2xl font-semibold">{session.title}</h2>
@@ -382,7 +639,6 @@ function VivaExamRoom({
             {session.subjectName} · Giảng viên: {session.teacherName}
           </p>
         </div>
-
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex items-center gap-1.5 text-xs">
             <span
@@ -398,371 +654,193 @@ function VivaExamRoom({
               {speechLang === "en-US"
                 ? t("student.tests.detectedLangEn")
                 : t("student.tests.detectedLangVi")}
-              {speechLang === "vi-VN"
-                ? isZeroTTSOnline
-                  ? " · ZeroTTS"
-                  : " · Google vi-VN"
-                : " · Google en-US"}
             </span>
           </div>
-
-          {speechLang === "vi-VN" ? (
-            <div className="flex items-center gap-1 text-xs">
-              <label htmlFor="voice-select" className="text-muted-foreground">
-                {t("student.tests.voiceSelect")}
-              </label>
-              <select
-                id="voice-select"
-                value={activeVoice}
-                onChange={(e) => setActiveVoice(e.target.value)}
-                className="h-8 rounded-md border border-input bg-background px-2 text-xs"
-              >
-                {ZEROTTS_VOICES.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {v.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-          ) : null}
-
-          <Button variant="ghost" size="sm" onClick={onClose}>
+          <p className="text-xs text-muted-foreground">
+            {t("student.tests.voiceSelect")}{" "}
+            <span className="font-medium text-foreground">
+              {voiceLabel(speechLang === "en-US" ? activeEnVoice : activeVoice)}
+              {!voiceReady ? "…" : ""}
+            </span>
+          </p>
+          <Button variant="ghost" size="sm" onClick={leave}>
             Thoát ca thi
           </Button>
         </div>
       </div>
 
-      {/* Tabs danh sách các câu hỏi */}
-      <div className="flex flex-wrap gap-2">
-        {questions.map((q, idx) => {
-          const evaluated = evaluations[q.id];
+      <div className="flex flex-wrap gap-2" aria-label={t("student.tests.questionLabel", {
+        current: String(currentIndex + 1),
+        total: String(questions.length),
+      })}>
+        {questions.map((question, index) => {
+          const evaluated = evaluations[question.id];
+          const current = index === currentIndex;
           return (
-            <button
-              key={q.id}
-              type="button"
-              onClick={() => {
-                stopTTS();
-                setIsSpeaking(false);
-                resetTranscript();
-                setCurrentIndex(idx);
-              }}
-              className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
-                currentIndex === idx
+            <span
+              key={question.id}
+              className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium ${
+                current
                   ? "border-primary bg-primary/10 text-primary"
                   : evaluated
                     ? "border-emerald-500/50 bg-emerald-50 text-emerald-800 dark:bg-emerald-950/20 dark:text-emerald-300"
-                    : "border-border bg-background text-muted-foreground hover:bg-muted"
+                    : "border-border bg-background text-muted-foreground"
               }`}
             >
-              {evaluated ? (
-                <CheckCircle2Icon className="size-3.5 text-emerald-600" />
-              ) : null}
-              Câu {idx + 1}
-            </button>
+              {evaluated ? <CheckCircle2Icon className="size-3.5 text-emerald-600" /> : null}
+              {index + 1}
+            </span>
           );
         })}
       </div>
 
-      {/* Card Câu hỏi hiện tại */}
-      {currentQuestion && (
-        <Card className="border-2 border-primary/20 shadow-sm">
-          <CardHeader className="flex flex-col gap-2 border-b bg-muted/20 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-center gap-2">
-              <span className="rounded-md bg-primary/15 px-2.5 py-0.5 text-xs font-semibold text-primary">
-                Câu {currentIndex + 1} / {questions.length}
-              </span>
-              <span className="rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-                Bloom: {currentQuestion.bloom}
-              </span>
-              <span className="rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-                Điểm tối đa: {currentQuestion.maxScore}
-              </span>
+      <Card className="border-2 border-primary/20 shadow-sm">
+        <CardHeader className="flex flex-col gap-3 border-b bg-muted/20 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-md bg-primary/15 px-2.5 py-0.5 text-xs font-semibold text-primary">
+              {t("student.tests.questionLabel", {
+                current: String(currentIndex + 1),
+                total: String(questions.length),
+              })}
+            </span>
+            <span className="rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+              Bloom: {currentQuestion.bloom}
+            </span>
+          </div>
+          <div className="flex items-center gap-2" role="status" aria-live="polite">
+            {phase === "listening" && isListening ? (
+              <MicIcon className="size-4 animate-pulse text-rose-500" />
+            ) : phase === "evaluating" ? (
+              <Loader2Icon className="size-4 animate-spin text-primary" />
+            ) : phase === "speaking" ? (
+              <Volume2Icon className="size-4 animate-pulse text-primary" />
+            ) : null}
+            <span className="text-sm font-medium">{status}</span>
+          </div>
+        </CardHeader>
+
+        <CardContent className="space-y-5 pt-6">
+          {phase === "countdown" && countdown > 0 ? (
+            <div className="flex flex-col items-center gap-2 py-6 text-center">
+              <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
+                {t("student.tests.preparing")}
+              </p>
+              <p className="font-serif text-7xl tabular-nums text-primary">{countdown}</p>
             </div>
+          ) : null}
 
-            {/* Nút TTS - AI Đọc câu hỏi */}
-            <Button
-              type="button"
-              variant={isSpeaking ? "destructive" : "outline"}
-              size="sm"
-              onClick={() => handleSpeak(currentQuestion.prompt)}
-              className="flex items-center gap-2 text-xs"
-            >
-              {isSpeaking ? (
-                <>
-                  <VolumeXIcon className="size-4 animate-pulse" />
-                  {t("student.tests.stopSpeaking")}
-                </>
-              ) : (
-                <>
-                  <Volume2Icon className="size-4 text-primary" />
-                  {t("student.tests.listenQuestion")}
-                </>
-              )}
-            </Button>
-          </CardHeader>
-
-          <CardContent className="space-y-6 pt-6">
-            {/* Nội dung câu hỏi */}
-            <div className="rounded-xl border bg-card p-4">
-              <p className="text-lg font-medium leading-relaxed">{currentQuestion.prompt}</p>
-              {currentQuestion.criteria && (
-                <p className="mt-2 text-xs text-muted-foreground">
-                  Tiêu chí chấm: {currentQuestion.criteria}
-                </p>
-              )}
-            </div>
-
-            {/* Khung Trả lời bằng Giọng nói (STT) */}
-            <div className="space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <label className="text-sm font-semibold text-foreground">
-                  Câu trả lời của bạn:
-                </label>
-
-                {isListening && (
-                  <span className="flex items-center gap-1.5 text-xs font-semibold text-rose-500 animate-pulse">
-                    <span className="size-2 rounded-full bg-rose-500" />
-                    {t("student.tests.speakingActive")}
-                  </span>
-                )}
-              </div>
-
-              {/* Textarea hiển thị transcript thời gian thực */}
-              <div className="relative">
-                <textarea
-                  value={transcript}
-                  onChange={(e) => setTranscript(e.target.value)}
-                  placeholder={t("student.tests.answerPlaceholder")}
-                  rows={4}
-                  className="w-full rounded-lg border border-input bg-background p-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
-                />
-              </div>
-
-              {sttError && (
-                <p className="text-xs text-destructive">{sttError}</p>
-              )}
-
-              {/* Các nút hành động STT & Gửi */}
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <Button
-                    type="button"
-                    variant={isListening ? "destructive" : "default"}
-                    onClick={() => {
-                      if (isListening) {
-                        stopListening();
-                      } else {
-                        startListening();
-                      }
-                    }}
-                    className="flex items-center gap-2 text-sm"
-                  >
-                    {isListening ? (
-                      <>
-                        <MicOffIcon className="size-4" />
-                        {t("student.tests.stopListening")}
-                      </>
-                    ) : (
-                      <>
-                        <MicIcon className="size-4 animate-bounce" />
-                        {t("student.tests.startSpeaking")}
-                      </>
-                    )}
-                  </Button>
-
-                  {transcript ? (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => resetTranscript()}
-                      className="flex items-center gap-1 text-xs text-muted-foreground"
-                    >
-                      <RotateCcwIcon className="size-3.5" />
-                      Làm mới
-                    </Button>
-                  ) : null}
-                </div>
-
-                <Button
-                  type="button"
-                  variant="secondary"
-                  disabled={evaluating || !transcript.trim()}
-                  onClick={handleSendAnswer}
-                  className="flex items-center gap-2"
+          <div ref={dialogueRef} className="max-h-[28rem] space-y-3 overflow-y-auto pr-1">
+            {bubbles.map((item) => (
+              <div
+                key={item.id}
+                className={`flex ${item.role === "student" ? "justify-end" : "justify-start"}`}
+              >
+                <div
+                  className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+                    item.role === "student"
+                      ? "bg-primary text-primary-foreground"
+                      : "border bg-card"
+                  }`}
                 >
-                  <SendIcon className="size-4" />
-                  {evaluating ? t("student.tests.evaluating") : t("student.tests.sendToAi")}
-                </Button>
-              </div>
-            </div>
-
-            {/* Khung Kết quả Đánh giá của AI */}
-            {currentEvaluation && (
-              <div className="space-y-4 rounded-xl border border-primary/20 bg-primary/5 p-4">
-                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-primary/10 pb-3">
-                  <div className="flex items-center gap-2">
-                    <SparklesIcon className="size-4 text-primary" />
-                    <span className="font-semibold text-sm">
-                      {t("student.tests.aiFeedback")}
-                    </span>
-                  </div>
-                  <span className="rounded-full bg-primary/15 px-3 py-0.5 text-xs font-bold text-primary">
-                    {currentEvaluation.evaluator === "RULE_BASED"
-                      ? t("student.tests.provisionalScore", { score: String(currentEvaluation.score) })
-                      : t("student.tests.aiScore", { score: String(currentEvaluation.score) })}
-                  </span>
-                </div>
-
-                {currentEvaluation.evaluator === "RULE_BASED" && (
-                  <p className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-950 dark:text-amber-100">
-                    <TriangleAlertIcon className="mt-0.5 size-3.5 shrink-0" aria-hidden />
-                    {t("student.tests.ruleBasedNotice")}
+                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider opacity-70">
+                    {item.role === "student" ? t("student.tests.you") : t("student.tests.examiner")}
                   </p>
-                )}
-
-                <p className="text-sm leading-relaxed text-foreground/90">
-                  {currentEvaluation.feedback}
-                </p>
-
-                {currentEvaluation.criteria && currentEvaluation.criteria.length > 0 && (
-                  <ul className="space-y-1.5 text-xs">
-                    {currentEvaluation.criteria.map((criterion) => (
-                      <li key={criterion.name} className="flex flex-wrap justify-between gap-x-3 gap-y-0.5">
-                        <span className="font-medium">{criterion.name}</span>
-                        <span className="tabular-nums text-muted-foreground">
-                          {formatPoints(criterion.points)} / {formatPoints(criterion.maxPoints)}
-                        </span>
-                        {criterion.comment ? (
-                          <span className="w-full text-muted-foreground">{criterion.comment}</span>
-                        ) : null}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-
-                {/* Nếu AI yêu cầu câu hỏi phụ (Follow-up) */}
-                {currentEvaluation.followUpQuestion && (
-                  <div className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-amber-900 dark:text-amber-200">
-                        {t("student.tests.followUpTitle")}
-                      </span>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() =>
-                          handleSpeak(currentEvaluation.followUpQuestion || "")
-                        }
-                        className="h-7 text-xs text-amber-900 dark:text-amber-200"
-                      >
-                        <Volume2Icon className="size-3.5 mr-1" />
-                        Nghe câu hỏi phụ
-                      </Button>
-                    </div>
-
-                    <p className="text-sm font-medium text-amber-950 dark:text-amber-100">
-                      {currentEvaluation.followUpQuestion}
-                    </p>
-
-                    {/* Vùng trả lời câu hỏi phụ */}
-                    <div className="space-y-2 pt-2">
-                      <textarea
-                        value={isListening ? transcript : followUpAnswer}
-                        onChange={(e) => setFollowUpAnswer(e.target.value)}
-                        placeholder="Nhấn Micro hoặc nhập câu trả lời bổ sung..."
-                        rows={2}
-                        className="w-full rounded-md border border-input bg-background p-2.5 text-xs outline-none"
-                      />
-                      <div className="flex items-center justify-between gap-2">
-                        <Button
-                          type="button"
-                          variant={isListening ? "destructive" : "outline"}
-                          size="sm"
-                          onClick={() => {
-                            if (isListening) {
-                              stopListening();
-                              setFollowUpAnswer(transcript);
-                            } else {
-                              resetTranscript();
-                              startListening();
-                            }
-                          }}
-                          className="text-xs flex items-center gap-1.5"
-                        >
-                          <MicIcon className="size-3.5" />
-                          {isListening ? "Dừng nói" : "Bật Mic trả lời ý này"}
-                        </Button>
-
-                        <Button
-                          type="button"
-                          size="sm"
-                          disabled={
-                            evaluatingFollowUp ||
-                            (!followUpAnswer.trim() && !transcript.trim())
-                          }
-                          onClick={handleSendFollowUp}
-                          className="text-xs flex items-center gap-1.5"
-                        >
-                          {evaluatingFollowUp ? "Đang gửi..." : "Gửi câu trả lời bổ sung"}
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                )}
+                  {item.text}
+                </div>
               </div>
-            )}
+            ))}
+          </div>
 
-            {/* Điều hướng Next hoặc Hoàn thành */}
-            <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
+          {phase === "listening" || phase === "choose" ? (
+            <div className="rounded-2xl border bg-muted/30 px-4 py-3">
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                {t("student.tests.you")}
+              </p>
+              <p className="min-h-12 text-base leading-relaxed">
+                {transcript.trim() ? (
+                  transcript
+                ) : (
+                  <span className="text-muted-foreground">{t("student.tests.liveCaptionEmpty")}</span>
+                )}
+              </p>
+              {phase === "listening" ? (
+                <p className="mt-2 text-xs text-muted-foreground">{t("student.tests.speakDoneHint")}</p>
+              ) : null}
+            </div>
+          ) : null}
+
+          {sttError ? <p className="text-xs text-destructive">{sttError}</p> : null}
+          {!isSupported ? (
+            <p className="text-xs text-destructive">
+              Trình duyệt không hỗ trợ nhận diện giọng nói. Hãy dùng Google Chrome hoặc Microsoft Edge.
+            </p>
+          ) : null}
+
+          {currentEvaluation?.evaluator === "RULE_BASED" ? (
+            <p className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-950 dark:text-amber-100">
+              <TriangleAlertIcon className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+              {t("student.tests.ruleBasedNotice")}
+            </p>
+          ) : null}
+
+          {currentEvaluation ? (
+            <p className="flex items-center gap-2 text-xs text-muted-foreground">
+              <SparklesIcon className="size-3.5 text-primary" />
+              {currentEvaluation.evaluator === "RULE_BASED"
+                ? t("student.tests.provisionalScore", { score: String(currentEvaluation.score) })
+                : t("student.tests.aiScore", { score: String(currentEvaluation.score) })}
+            </p>
+          ) : null}
+
+          {phase === "choose" ? (
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Button type="button" className="flex-1" onClick={continueQuestion}>
+                {t("student.tests.chooseContinue")}
+              </Button>
+              <Button type="button" variant="outline" className="flex-1" onClick={skipQuestion}>
+                {t("student.tests.chooseNext")}
+              </Button>
+            </div>
+          ) : null}
+
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
+            <div className="flex flex-wrap items-center gap-2">
               <Button
                 type="button"
                 variant="outline"
-                disabled={currentIndex === 0}
-                onClick={() => {
-                  stopTTS();
-                  setIsSpeaking(false);
-                  resetTranscript();
-                  setCurrentIndex((prev) => Math.max(0, prev - 1));
-                }}
+                disabled={phase === "evaluating" || phase === "countdown" || phase === "speaking"}
+                onClick={replay}
               >
-                Câu trước
+                <Volume2Icon className="size-4" />
+                {t("student.tests.replay")}
               </Button>
-
-              <div className="flex items-center gap-2">
-                {!isLastQuestion ? (
-                  <Button
-                    type="button"
-                    onClick={() => {
-                      stopTTS();
-                      setIsSpeaking(false);
-                      resetTranscript();
-                      setCurrentIndex((prev) =>
-                        Math.min(questions.length - 1, prev + 1)
-                      );
-                    }}
-                    className="flex items-center gap-1.5"
-                  >
-                    {t("student.tests.nextQuestion")}
-                    <ChevronRightIcon className="size-4" />
-                  </Button>
-                ) : (
-                  <Button
-                    type="button"
-                    variant="default"
-                    disabled={submittingExam}
-                    onClick={handleFinishExam}
-                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-medium"
-                  >
-                    {submittingExam ? "Đang nộp..." : t("student.tests.finishExam")}
-                  </Button>
-                )}
-              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={phase === "evaluating" || phase === "countdown" || submittingExam}
+                onClick={skipQuestion}
+              >
+                {t("student.tests.skipQuestion")}
+              </Button>
             </div>
-          </CardContent>
-        </Card>
-      )}
+            {phase === "listening" ? (
+              <Button
+                type="button"
+                disabled={!transcript.trim()}
+                onClick={() => void submitAnswer(transcript)}
+              >
+                <MicIcon className="size-4" />
+                {t("student.tests.speakDone")}
+              </Button>
+            ) : null}
+            {phase === "done" ? (
+              <Button type="button" disabled={submittingExam} onClick={() => void finishExam()}>
+                {submittingExam ? t("student.tests.evaluating") : t("student.tests.finishExam")}
+              </Button>
+            ) : null}
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

@@ -54,7 +54,14 @@ final class GradingResponseParser {
             double earned = criteria.stream().mapToDouble(CriterionScore::points).sum();
             score = (int) Math.round(100.0 * earned / possible);
         }
-        return new Grade(score, sufficient.asBoolean(), feedback.asText().trim(), followUp, criteria);
+        return new Grade(
+                score,
+                sufficient.asBoolean(),
+                feedback.asText().trim(),
+                followUp,
+                criteria,
+                studentStuck(data.get("studentStuck"))
+        );
     }
 
     private static List<CriterionScore> criteria(JsonNode node, List<RubricCriterionItem> rubric) {
@@ -108,6 +115,17 @@ final class GradingResponseParser {
         } catch (Exception exception) {
             throw new InvalidGradingResponse("response is not valid JSON");
         }
+    }
+
+    /** Optional. A missing value means the student is still able to continue. */
+    private static boolean studentStuck(JsonNode node) {
+        if (node == null || node.isNull()) {
+            return false;
+        }
+        if (!node.isBoolean()) {
+            throw new InvalidGradingResponse("studentStuck is not a boolean");
+        }
+        return node.asBoolean();
     }
 
     private static double clamp(double value, double max) {

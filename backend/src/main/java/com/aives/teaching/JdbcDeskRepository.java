@@ -630,15 +630,20 @@ public class JdbcDeskRepository {
         );
     }
 
-    /** Best stored answer score (0-100) per question, across the main and follow-up turns of an attempt. */
+    /**
+     * Score (0-100) per question across the main and follow-up turns of an attempt. When the teacher has
+     * graded any turn of a question, the teacher's best mark wins; otherwise the best AI score is used.
+     */
     public Map<String, Double> bestAnswerScores(String attemptId) {
         Map<String, Double> scores = new HashMap<>();
         jdbc.query(
                 """
-                SELECT qt.question_id::text, MAX(ans.score)
+                SELECT qt.question_id::text,
+                       CASE WHEN bool_or(ans.teacher_score IS NOT NULL)
+                            THEN MAX(ans.teacher_score) ELSE MAX(ans.score) END
                 FROM question_turn qt
                 JOIN answer ans ON ans.turn_id = qt.id
-                WHERE qt.attempt_id = ?::uuid AND ans.score IS NOT NULL
+                WHERE qt.attempt_id = ?::uuid AND (ans.score IS NOT NULL OR ans.teacher_score IS NOT NULL)
                 GROUP BY qt.question_id
                 """,
                 (RowCallbackHandler) rs -> scores.put(rs.getString(1), rs.getDouble(2)),
@@ -733,29 +738,48 @@ public class JdbcDeskRepository {
     public SpeechSettings speechSettings() {
         List<SpeechSettings> rows = jdbc.query(
                 """
-                SELECT stt_language, tts_language FROM language_config
+                SELECT stt_language, tts_language,
+                       COALESCE(NULLIF(tts_voice, ''), 'maichi'),
+                       COALESCE(NULLIF(tts_voice_en, ''), 'maichi')
+                FROM language_config
                 ORDER BY is_default DESC, code LIMIT 1
                 """,
-                (rs, row) -> new SpeechSettings(shortCode(rs.getString(1)), shortCode(rs.getString(2)))
+                (rs, row) -> new SpeechSettings(
+                        shortCode(rs.getString(1)),
+                        shortCode(rs.getString(2)),
+                        rs.getString(3),
+                        rs.getString(4)
+                )
         );
-        return rows.isEmpty() ? new SpeechSettings("vi", "vi") : rows.getFirst();
+        return rows.isEmpty()
+                ? new SpeechSettings("vi", "vi", "maichi", "maichi")
+                : rows.getFirst();
     }
 
     @Transactional
-    public void saveSpeech(String sttLanguage, String ttsLanguage) {
+    public void saveSpeech(String sttLanguage, String ttsLanguage, String ttsVoice, String ttsVoiceEn) {
         String code = sttLanguage.equals(ttsLanguage) ? sttLanguage : sttLanguage + "-" + ttsLanguage;
+        String voice = ttsVoice == null || ttsVoice.isBlank() ? "maichi" : ttsVoice.trim();
+        String voiceEn = ttsVoiceEn == null || ttsVoiceEn.isBlank() ? "maichi" : ttsVoiceEn.trim();
         jdbc.update("UPDATE language_config SET is_default = false");
         jdbc.update(
                 """
-                INSERT INTO language_config (id, code, name, stt_language, tts_language, is_default)
-                VALUES (?::uuid, ?, ?, ?, ?, true)
-                ON CONFLICT (code) DO UPDATE SET is_default = true
+                INSERT INTO language_config (id, code, name, stt_language, tts_language, tts_voice, tts_voice_en, is_default)
+                VALUES (?::uuid, ?, ?, ?, ?, ?, ?, true)
+                ON CONFLICT (code) DO UPDATE SET
+                    is_default = true,
+                    stt_language = EXCLUDED.stt_language,
+                    tts_language = EXCLUDED.tts_language,
+                    tts_voice = EXCLUDED.tts_voice,
+                    tts_voice_en = EXCLUDED.tts_voice_en
                 """,
                 UUID.randomUUID().toString(),
                 code,
                 "STT " + sttLanguage + " / TTS " + ttsLanguage,
                 LOCALES.getOrDefault(sttLanguage, sttLanguage),
-                LOCALES.getOrDefault(ttsLanguage, ttsLanguage)
+                LOCALES.getOrDefault(ttsLanguage, ttsLanguage),
+                voice,
+                voiceEn
         );
     }
 

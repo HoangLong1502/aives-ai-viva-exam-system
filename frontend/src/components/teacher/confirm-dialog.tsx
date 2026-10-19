@@ -14,6 +14,7 @@ export function ConfirmDialog({
   onCancel,
   destructive = false,
   confirming = false,
+  confirmDisabled = false,
 }: {
   open: boolean;
   title: string;
@@ -24,6 +25,7 @@ export function ConfirmDialog({
   onCancel: () => void;
   destructive?: boolean;
   confirming?: boolean;
+  confirmDisabled?: boolean;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
 

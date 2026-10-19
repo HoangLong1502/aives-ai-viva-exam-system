@@ -70,6 +70,14 @@ export function formatAttemptStatus(
       return labels.scored;
     case "IN_PROGRESS":
       return labels.inProgress;
+    case "SCHEDULED":
+      return labels.scheduled;
+    case "COMPLETED":
+      return labels.completed;
+    case "DRAFT":
+      return labels.draft;
+    case "PUBLISHED":
+      return labels.published;
     default:
       return status.replaceAll("_", " ");
   }

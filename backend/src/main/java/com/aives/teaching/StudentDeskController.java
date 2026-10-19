@@ -5,6 +5,7 @@ import com.aives.teaching.DeskRecords.AttemptItem;
 import com.aives.teaching.DeskRecords.ExamQuestionItem;
 import com.aives.teaching.DeskRecords.QuestionItem;
 import com.aives.teaching.DeskRecords.SessionItem;
+import com.aives.teaching.DeskRecords.SpeechSettings;
 import com.aives.teaching.DeskRecords.SubmitAttemptResult;
 import com.aives.teaching.DeskRecords.VivaEvaluationItem;
 import com.aives.teaching.DeskRecords.VivaTurnItem;
@@ -30,6 +31,11 @@ public class StudentDeskController {
     public StudentDeskController(JdbcDeskRepository desk, VivaEvaluationService evaluationService) {
         this.desk = desk;
         this.evaluationService = evaluationService;
+    }
+
+    @GetMapping("/speech")
+    public SpeechSettings speech() {
+        return desk.speechSettings();
     }
 
     @GetMapping("/exams")
@@ -82,7 +88,8 @@ public class StudentDeskController {
                 id,
                 turnId,
                 request.answer(),
-                request.durationMs()
+                request.durationMs(),
+                request.followUpQuestion()
         );
     }
 

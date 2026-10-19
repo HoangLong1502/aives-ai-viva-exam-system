@@ -6,7 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
-  useState,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 import { en } from "./messages/en";
@@ -39,12 +39,24 @@ function readStoredLocale(): Locale | null {
   return null;
 }
 
-function resolveInitialLocale(): Locale {
-  if (typeof window === "undefined") return "en";
-  const stored = readStoredLocale();
-  if (stored) return stored;
-  const lang = navigator.language.toLowerCase();
-  return lang.startsWith("vi") ? "vi" : "en";
+const localeListeners = new Set<() => void>();
+
+function subscribeLocale(listener: () => void) {
+  localeListeners.add(listener);
+  return () => localeListeners.delete(listener);
+}
+
+function currentLocale(): Locale {
+  return readStoredLocale() ?? (navigator.language.toLowerCase().startsWith("vi") ? "vi" : "en");
+}
+
+function publishLocale(next: Locale) {
+  try {
+    localStorage.setItem(STORAGE_KEY, next);
+  } catch {
+    /* ignore */
+  }
+  localeListeners.forEach((listener) => listener());
 }
 
 function lookup(messages: Catalog, key: string): string | undefined {
@@ -63,23 +75,14 @@ function format(template: string, params?: Record<string, string>) {
 }
 
 export function LocaleProvider({ children }: { children: ReactNode }) {
-  const [locale, setLocaleState] = useState<Locale>("en");
-
-  useEffect(() => {
-    setLocaleState(resolveInitialLocale());
-  }, []);
+  const locale = useSyncExternalStore(subscribeLocale, currentLocale, () => "en" as Locale);
 
   useEffect(() => {
     document.documentElement.lang = locale === "vi" ? "vi" : "en";
-    try {
-      localStorage.setItem(STORAGE_KEY, locale);
-    } catch {
-      /* ignore */
-    }
   }, [locale]);
 
   const setLocale = useCallback((next: Locale) => {
-    setLocaleState(next);
+    publishLocale(next);
   }, []);
 
   const messages = catalogs[locale];

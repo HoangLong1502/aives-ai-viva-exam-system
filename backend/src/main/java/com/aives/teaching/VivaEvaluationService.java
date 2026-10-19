@@ -3,7 +3,8 @@ package com.aives.teaching;
 import com.aives.ai.ChatCompletionClient;
 import com.aives.ai.ChatCompletionClient.AiUnavailableException;
 import com.aives.ai.ChatCompletionClient.Completion;
-import com.aives.teaching.AttemptScoring.WeightedQuestion;
+import com.aives.rag.DocumentIngestionService;
+import com.aives.rag.VivaQuestionGenerator.Passage;
 import com.aives.teaching.DeskRecords.QuestionItem;
 import com.aives.teaching.DeskRecords.RubricCriterionItem;
 import com.aives.teaching.DeskRecords.RubricDetailItem;
@@ -14,6 +15,8 @@ import com.aives.teaching.GradingResponseParser.InvalidGradingResponse;
 import com.aives.user.PublicUser;
 import com.aives.web.ApiException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -27,15 +30,23 @@ import org.springframework.transaction.annotation.Transactional;
 public class VivaEvaluationService {
 
     private static final Logger log = LoggerFactory.getLogger(VivaEvaluationService.class);
+    private static final int MATERIAL_LIMIT = 4;
 
     private final ObjectMapper mapper;
     private final JdbcDeskRepository desk;
     private final ChatCompletionClient ai;
+    private final DocumentIngestionService documents;
 
-    public VivaEvaluationService(ObjectMapper mapper, JdbcDeskRepository desk, ChatCompletionClient ai) {
+    public VivaEvaluationService(
+            ObjectMapper mapper,
+            JdbcDeskRepository desk,
+            ChatCompletionClient ai,
+            DocumentIngestionService documents
+    ) {
         this.mapper = mapper;
         this.desk = desk;
         this.ai = ai;
+        this.documents = documents;
     }
 
     @Transactional
@@ -52,25 +63,22 @@ public class VivaEvaluationService {
                 .findFirst()
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Question not found on this exam"));
 
+        List<VivaTurnItem> previous = desk.turnsForAttempt(attemptId);
         UUID turnId = UUID.randomUUID();
         int turnNo = desk.nextTurnNo(attemptId);
         desk.insertTurn(turnId, attemptId, questionId, null, turnNo, "MAIN", null, question.prompt());
 
-        VivaEvaluationItem evaluation = evaluate(question, studentAnswer, false, turnId.toString(), questionId);
-
-        desk.insertAnswer(
-                UUID.randomUUID(),
-                turnId.toString(),
+        VivaEvaluationItem evaluation = evaluate(
+                question,
                 studentAnswer,
-                !evaluation.isSufficient() && evaluation.followUpQuestion() != null,
-                evaluation.isSufficient() ? null : "MISSING_KEY_POINTS",
-                durationMs,
-                evaluation.score(),
-                evaluation.isSufficient(),
-                evaluation.feedback(),
-                evaluation.evaluator()
+                false,
+                turnId.toString(),
+                questionId,
+                history(previous, questionId),
+                0,
+                question.prompt()
         );
-
+        storeAnswer(turnId, studentAnswer, durationMs, evaluation);
         return evaluation;
     }
 
@@ -80,11 +88,11 @@ public class VivaEvaluationService {
             String examId,
             String parentTurnId,
             String studentAnswer,
-            Integer durationMs
+            Integer durationMs,
+            String askedQuestion
     ) {
         String attemptId = openAttempt(examId, student.id());
 
-        // Find parent turn to associate question
         List<VivaTurnItem> previousTurns = desk.turnsForAttempt(attemptId);
         VivaTurnItem parent = previousTurns.stream()
                 .filter(t -> t.turnId().equals(parentTurnId))
@@ -96,25 +104,40 @@ public class VivaEvaluationService {
             throw new ApiException(HttpStatus.NOT_FOUND, "Associated question not found");
         }
 
+        int priorFollowUps = (int) previousTurns.stream()
+                .filter(turn -> parent.questionId().equals(turn.questionId()) && "FOLLOW_UP".equals(turn.turnType()))
+                .count();
+        String questionText = askedQuestion == null || askedQuestion.isBlank()
+                ? question.prompt()
+                : askedQuestion.trim();
+        if (questionText.length() > 2000) {
+            questionText = questionText.substring(0, 2000);
+        }
+
         UUID turnId = UUID.randomUUID();
         int turnNo = desk.nextTurnNo(attemptId);
-        desk.insertTurn(turnId, attemptId, parent.questionId(), parentTurnId, turnNo, "FOLLOW_UP", 1, "Follow-up discussion");
-
-        VivaEvaluationItem evaluation = evaluate(question, studentAnswer, true, turnId.toString(), parent.questionId());
-
-        desk.insertAnswer(
-                UUID.randomUUID(),
-                turnId.toString(),
-                studentAnswer,
-                false,
-                null,
-                durationMs,
-                evaluation.score(),
-                evaluation.isSufficient(),
-                evaluation.feedback(),
-                evaluation.evaluator()
+        desk.insertTurn(
+                turnId,
+                attemptId,
+                parent.questionId(),
+                parentTurnId,
+                turnNo,
+                "FOLLOW_UP",
+                priorFollowUps + 1,
+                questionText
         );
 
+        VivaEvaluationItem evaluation = evaluate(
+                question,
+                studentAnswer,
+                true,
+                turnId.toString(),
+                parent.questionId(),
+                history(previousTurns, parent.questionId()),
+                priorFollowUps + 1,
+                questionText
+        );
+        storeAnswer(turnId, studentAnswer, durationMs, evaluation);
         return evaluation;
     }
 
@@ -133,15 +156,13 @@ public class VivaEvaluationService {
     @Transactional
     public SubmitAttemptResult submitExam(PublicUser student, String examId) {
         String attemptId = openAttempt(examId, student.id());
-        List<WeightedQuestion> questions = desk.questionsOnExam(examId).stream()
-                .map(question -> new WeightedQuestion(question.id(), question.maxScore()))
-                .toList();
+        List<String> questions = desk.questionsOnExam(examId).stream().map(QuestionItem::id).toList();
         Map<String, Double> best = desk.bestAnswerScores(attemptId);
         int finalScore = AttemptScoring.finalScore(questions, best);
         if (!desk.submitAttempt(attemptId, finalScore)) {
             throw new ApiException(HttpStatus.CONFLICT, "This exam has already been submitted");
         }
-        int answered = (int) questions.stream().filter(question -> best.containsKey(question.questionId())).count();
+        int answered = (int) questions.stream().filter(best::containsKey).count();
         return new SubmitAttemptResult(finalScore, answered, questions.size());
     }
 
@@ -164,41 +185,148 @@ public class VivaEvaluationService {
         return attemptId;
     }
 
+    private void storeAnswer(UUID turnId, String studentAnswer, Integer durationMs, VivaEvaluationItem evaluation) {
+        String reason = switch (evaluation.nextAction()) {
+            case VivaTurnFlow.FOLLOW_UP -> "MISSING_KEY_POINTS";
+            case VivaTurnFlow.ASK_CONTINUE -> "STUDENT_STUCK";
+            default -> null;
+        };
+        desk.insertAnswer(
+                UUID.randomUUID(),
+                turnId.toString(),
+                studentAnswer,
+                VivaTurnFlow.FOLLOW_UP.equals(evaluation.nextAction()),
+                reason,
+                durationMs,
+                evaluation.score(),
+                evaluation.isSufficient(),
+                evaluation.feedback(),
+                evaluation.evaluator()
+        );
+    }
+
+    private static List<GradingPrompt.PriorTurn> history(List<VivaTurnItem> turns, String questionId) {
+        return turns.stream()
+                .filter(turn -> questionId.equals(turn.questionId()))
+                .map(turn -> new GradingPrompt.PriorTurn(turn.questionText(), turn.transcript()))
+                .toList();
+    }
+
     private VivaEvaluationItem evaluate(
             QuestionItem question,
             String studentAnswer,
             boolean isFollowUp,
             String turnId,
-            String questionId
+            String questionId,
+            List<GradingPrompt.PriorTurn> history,
+            int followUpDepth,
+            String examinerJustAsked
     ) {
         String cleanAnswer = studentAnswer == null ? "" : studentAnswer.trim();
         String language = detectPromptLanguage(question.prompt());
+        List<String> materials = courseMaterials(question);
+        List<RubricCriterionItem> criteria = rubricCriteria(question);
 
-        String fallbackReason;
-        if (!ai.configured()) {
-            fallbackReason = "AI grader is not configured";
-        } else if (cleanAnswer.isBlank()) {
-            fallbackReason = "No answer was captured";
-        } else {
-            List<RubricCriterionItem> criteria = rubricCriteria(question);
+        if (ai.configured() && !cleanAnswer.isBlank()) {
             try {
-                Completion completion = ai.complete(Map.of(
-                        "temperature", 0.1,
-                        "response_format", Map.of("type", "json_object"),
-                        "messages", GradingPrompt.messages(question, criteria, cleanAnswer, isFollowUp, language)
-                ));
-                Grade grade = GradingResponseParser.parse(completion.content(), criteria, mapper);
-                return item(grade, isFollowUp, turnId, questionId, "AI", null);
-            } catch (AiUnavailableException exception) {
-                fallbackReason = "AI grader unavailable: " + exception.getMessage();
-            } catch (InvalidGradingResponse exception) {
-                fallbackReason = "AI grader returned an invalid result: " + exception.getMessage();
+                return item(
+                        gradeWithAi(question, criteria, cleanAnswer, isFollowUp, language, history, examinerJustAsked, materials),
+                        followUpDepth,
+                        turnId,
+                        questionId,
+                        "AI",
+                        null
+                );
+            } catch (Exception exception) {
+                log.warn(
+                        "AI grading failed for question {} (turn {}); recovering with materials: {}",
+                        questionId,
+                        turnId,
+                        exception.getMessage()
+                );
             }
-            log.warn("Falling back to rule-based grading for question {} (turn {}): {}", questionId, turnId, fallbackReason);
         }
 
-        Grade grade = RuleBasedGrader.grade(question, cleanAnswer, isFollowUp, "English".equals(language));
-        return item(grade, isFollowUp, turnId, questionId, "RULE_BASED", fallbackReason);
+        Grade grade = RuleBasedGrader.grade(
+                question,
+                cleanAnswer,
+                isFollowUp,
+                "English".equals(language),
+                materials
+        );
+        String reason = !ai.configured()
+                ? "AI grader is not configured; scored from the question and course materials"
+                : cleanAnswer.isBlank()
+                        ? "No answer was captured"
+                        : "AI grader failed after recovery; scored from the question and course materials";
+        return item(grade, followUpDepth, turnId, questionId, "RULE_BASED", reason);
+    }
+
+    private Grade gradeWithAi(
+            QuestionItem question,
+            List<RubricCriterionItem> criteria,
+            String cleanAnswer,
+            boolean isFollowUp,
+            String language,
+            List<GradingPrompt.PriorTurn> history,
+            String examinerJustAsked,
+            List<String> materials
+    ) {
+        List<Map<String, Object>> messages = GradingPrompt.messages(
+                question, criteria, cleanAnswer, isFollowUp, language, history, examinerJustAsked, materials
+        );
+        String raw;
+        try {
+            raw = ai.complete(request(messages, true)).content();
+        } catch (AiUnavailableException unavailable) {
+            log.warn("Strict AI grading unavailable ({}); retrying without JSON mode", unavailable.getMessage());
+            raw = ai.complete(request(messages, false)).content();
+        }
+        try {
+            return GradingResponseParser.parse(raw, criteria, mapper);
+        } catch (InvalidGradingResponse invalid) {
+            log.warn("Repairing invalid AI grading JSON: {}", invalid.getMessage());
+            String repaired = ai.complete(request(
+                    GradingPrompt.repairMessages(raw, invalid.getMessage(), language),
+                    true
+            )).content();
+            return GradingResponseParser.parse(repaired, criteria, mapper);
+        }
+    }
+
+    private static Map<String, Object> request(List<Map<String, Object>> messages, boolean jsonMode) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("temperature", 0.1);
+        body.put("messages", messages);
+        if (jsonMode) {
+            body.put("response_format", Map.of("type", "json_object"));
+        }
+        return body;
+    }
+
+    private List<String> courseMaterials(QuestionItem question) {
+        String query = ((question.topic() == null ? "" : question.topic()) + " " +
+                (question.prompt() == null ? "" : question.prompt()) + " " +
+                (question.keyPoints() == null ? "" : question.keyPoints())).trim();
+        if (query.isBlank() || question.subjectId() == null) {
+            return List.of();
+        }
+        try {
+            List<Passage> passages = documents.retrieveForCourse(question.subjectId(), query, MATERIAL_LIMIT);
+            List<String> materials = new ArrayList<>(passages.size());
+            for (Passage passage : passages) {
+                String label = passage.source() == null ? "" : passage.source().trim();
+                String text = passage.text() == null ? "" : passage.text().trim();
+                if (text.isBlank()) {
+                    continue;
+                }
+                materials.add(label.isBlank() ? text : label + ": " + text);
+            }
+            return materials;
+        } catch (Exception exception) {
+            log.warn("Could not load course materials for grading: {}", exception.getMessage());
+            return List.of();
+        }
     }
 
     private List<RubricCriterionItem> rubricCriteria(QuestionItem question) {
@@ -211,24 +339,24 @@ public class VivaEvaluationService {
 
     private static VivaEvaluationItem item(
             Grade grade,
-            boolean isFollowUp,
+            int followUpDepth,
             String turnId,
             String questionId,
             String evaluator,
             String fallbackReason
     ) {
-        // A follow-up is the last turn for a question, so it never asks another one.
-        String followUp = isFollowUp || grade.sufficient() ? null : grade.followUpQuestion();
+        VivaTurnFlow.Decision decision = VivaTurnFlow.decide(grade, followUpDepth);
         return new VivaEvaluationItem(
                 turnId,
                 questionId,
                 grade.score(),
                 grade.sufficient(),
                 grade.feedback(),
-                followUp,
+                decision.followUpQuestion(),
                 evaluator,
                 fallbackReason,
-                grade.criteria()
+                grade.criteria(),
+                decision.nextAction()
         );
     }
 

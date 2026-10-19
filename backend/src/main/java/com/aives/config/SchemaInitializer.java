@@ -22,6 +22,7 @@ public class SchemaInitializer {
 
     @PostConstruct
     void init() {
+        applySchema();
         ensureMetaTable();
         if (isSeeded()) {
             return;
@@ -30,6 +31,12 @@ public class SchemaInitializer {
             new ResourceDatabasePopulator(new ClassPathResource("seed.sql")).execute(dataSource);
         }
         markSeeded();
+    }
+
+    private void applySchema() {
+        String existing = jdbc.queryForObject("SELECT to_regclass('public.question')::text", String.class);
+        String script = existing == null ? "schema.sql" : "schema-upgrade.sql";
+        new ResourceDatabasePopulator(new ClassPathResource(script)).execute(dataSource);
     }
 
     private void ensureMetaTable() {

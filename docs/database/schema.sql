@@ -1,6 +1,6 @@
 -- AIVES target schema for features 1 (question bank + rubric), 3 (AI viva core), 7 (administration).
 -- Design reference: importable into drawDB (Import from SQL, PostgreSQL).
--- Applied by backend/src/main/resources/db/migration/V1__init.sql (which also adds indexes, CHECKs, vector(384) and seed rows).
+-- Applied by backend/src/main/resources/schema.sql (which also adds indexes, CHECKs, vector(384) and seed rows).
 -- Notes: embedding is vector(384) in PostgreSQL; CHECK constraints (bloom_level, status, source,
 -- turn_type, FOLLOW_UP requires parent_turn_id) are documented in comments and to be added in a migration.
 
@@ -17,6 +17,7 @@ CREATE TABLE "user" (
   google_sub varchar(255) UNIQUE,
   full_name varchar(255) NOT NULL,
   student_code varchar(50),
+  phone varchar(20),
   role_id smallint NOT NULL,
   is_active boolean NOT NULL DEFAULT true,
   last_login_at timestamptz,
@@ -87,6 +88,9 @@ CREATE TABLE course_document (
   storage_path text NOT NULL,
   extraction_status varchar(20) NOT NULL DEFAULT 'PENDING',
   extraction_error text,
+  content_hash varchar(64),
+  page_count int,
+  processed_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
@@ -202,6 +206,14 @@ CREATE TABLE answer (
   follow_up_reason varchar(20), -- VAGUE | MISSING_POINT | CONTRADICTION
   stt_latency_ms int,
   llm_latency_ms int,
+  score numeric(5,2),
+  is_sufficient boolean,
+  feedback text,
+  evaluator varchar(20),
+  teacher_score numeric(5,2),
+  teacher_feedback text,
+  graded_by uuid,
+  graded_at timestamptz,
   answered_at timestamptz NOT NULL DEFAULT now()
 );
 

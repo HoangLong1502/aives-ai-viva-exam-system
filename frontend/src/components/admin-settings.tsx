@@ -6,15 +6,21 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { api, ApiError } from "@/lib/api";
+import { ENGLISH_VOICES, ZEROTTS_VOICES } from "@/lib/tts-service";
 import type { User } from "@/lib/types";
 
 type Subject = { id: string; code: string; name: string; teacherIds: string[] };
-type Speech = { sttLanguage: string; ttsLanguage: string };
+type Speech = { sttLanguage: string; ttsLanguage: string; ttsVoice: string; ttsVoiceEn: string };
 
 export function AdminSettings() {
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [teachers, setTeachers] = useState<User[]>([]);
-  const [speech, setSpeech] = useState<Speech>({ sttLanguage: "vi", ttsLanguage: "vi" });
+  const [speech, setSpeech] = useState<Speech>({
+    sttLanguage: "vi",
+    ttsLanguage: "vi",
+    ttsVoice: "maichi",
+    ttsVoiceEn: "maichi",
+  });
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
 
@@ -27,7 +33,12 @@ export function AdminSettings() {
       .then(([nextSubjects, people, nextSpeech]) => {
         setSubjects(nextSubjects);
         setTeachers(people.filter((person) => person.role === "EXAMINER"));
-        setSpeech(nextSpeech);
+        setSpeech({
+          sttLanguage: nextSpeech.sttLanguage || "vi",
+          ttsLanguage: nextSpeech.ttsLanguage || "vi",
+          ttsVoice: nextSpeech.ttsVoice || "maichi",
+          ttsVoiceEn: nextSpeech.ttsVoiceEn || "maichi",
+        });
       })
       .catch((error) => {
         toast.error(error instanceof ApiError ? error.message : "Could not load settings.");
@@ -145,7 +156,23 @@ export function AdminSettings() {
                 <option value="en">English</option>
               </select>
             </label>
-            <Button type="submit" className="sm:col-span-2 sm:w-fit">Save languages</Button>
+            <label className="space-y-1 text-sm">
+              <span>Vietnamese voice (ZeroTTS)</span>
+              <select className="h-9 w-full rounded-lg border border-input bg-background px-2" value={speech.ttsVoice} onChange={(event) => setSpeech((current) => ({ ...current, ttsVoice: event.target.value }))}>
+                {ZEROTTS_VOICES.map((voice) => (
+                  <option key={voice.id} value={voice.id}>{voice.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="space-y-1 text-sm">
+              <span>English voice</span>
+              <select className="h-9 w-full rounded-lg border border-input bg-background px-2" value={speech.ttsVoiceEn} onChange={(event) => setSpeech((current) => ({ ...current, ttsVoiceEn: event.target.value }))}>
+                {ENGLISH_VOICES.map((voice) => (
+                  <option key={voice.id} value={voice.id}>{voice.label}</option>
+                ))}
+              </select>
+            </label>
+            <Button type="submit" className="sm:col-span-2 sm:w-fit">Save speech settings</Button>
           </form>
         </CardContent>
       </Card>
