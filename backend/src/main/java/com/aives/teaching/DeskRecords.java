@@ -111,12 +111,19 @@ public final class DeskRecords {
     ) {
     }
 
-    public record SpeechSettings(String sttLanguage, String ttsLanguage) {
+    public record SpeechSettings(
+            String sttLanguage,
+            String ttsLanguage,
+            String ttsVoice,
+            String ttsVoiceEn
+    ) {
     }
 
     public record AnswerSubmissionRequest(
             String answer,
-            Integer durationMs
+            Integer durationMs,
+            /** The follow-up the examiner just asked, when this answer continues a question. */
+            String followUpQuestion
     ) {
     }
 
@@ -124,6 +131,7 @@ public final class DeskRecords {
      * @param evaluator      {@code AI} or {@code RULE_BASED}; rule-based grades are provisional
      * @param fallbackReason why the AI grader was not used, or null when it was
      * @param criteria       per-rubric-criterion points when the AI graded against the rubric
+     * @param nextAction     {@code NEXT}, {@code FOLLOW_UP}, or {@code ASK_CONTINUE}
      */
     public record VivaEvaluationItem(
             String turnId,
@@ -134,7 +142,8 @@ public final class DeskRecords {
             String followUpQuestion,
             String evaluator,
             String fallbackReason,
-            List<CriterionScore> criteria
+            List<CriterionScore> criteria,
+            String nextAction
     ) {
     }
 

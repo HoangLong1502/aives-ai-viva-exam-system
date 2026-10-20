@@ -6,38 +6,37 @@ import java.util.Map;
 /**
  * Computes an attempt's final score (0-100) from the per-question answer scores stored on the server.
  *
- * <p>Each question is weighted by its rubric's maximum points. A question the student never answered
+ * <p>The exam's {@value #TOTAL_POINTS} points are split equally across its questions, so every question
+ * is worth {@code 100 / questionCount} points for every student. A question the student never answered
  * counts as 0. When a question's best score comes from a follow-up turn, that better score is kept,
  * since the follow-up exists to let the student fill in the missing points.
  */
 public final class AttemptScoring {
 
+    public static final int TOTAL_POINTS = 100;
+
     private AttemptScoring() {
     }
 
-    public record WeightedQuestion(String questionId, int maxScore) {
+    /** Maximum points of one question on an exam with {@code questionCount} questions. */
+    public static double pointsPerQuestion(int questionCount) {
+        return questionCount <= 0 ? 0 : (double) TOTAL_POINTS / questionCount;
     }
 
     /**
-     * @param questions      the questions on the exam, with their rubric maximum
+     * @param questionIds     the questions on the exam
      * @param bestPercentages best answer score per question id, on a 0-100 scale
      */
-    public static int finalScore(List<WeightedQuestion> questions, Map<String, Double> bestPercentages) {
-        if (questions.isEmpty()) {
+    public static int finalScore(List<String> questionIds, Map<String, Double> bestPercentages) {
+        if (questionIds.isEmpty()) {
             return 0;
         }
-        // Rubrics without criteria have a maximum of 0; mixing those with real weights would silently
-        // drop the question, so fall back to equal weights for the whole exam instead.
-        boolean useRubricWeights = questions.stream().allMatch(question -> question.maxScore() > 0);
+        double perQuestion = pointsPerQuestion(questionIds.size());
         double earned = 0;
-        double possible = 0;
-        for (WeightedQuestion question : questions) {
-            double weight = useRubricWeights ? question.maxScore() : 1;
-            double percent = clamp(bestPercentages.getOrDefault(question.questionId(), 0.0));
-            earned += weight * percent / 100.0;
-            possible += weight;
+        for (String questionId : questionIds) {
+            earned += perQuestion * clamp(bestPercentages.getOrDefault(questionId, 0.0)) / 100.0;
         }
-        return (int) Math.round(100.0 * earned / possible);
+        return (int) Math.round(earned);
     }
 
     private static double clamp(Double value) {

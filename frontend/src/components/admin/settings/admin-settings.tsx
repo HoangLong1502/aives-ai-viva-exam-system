@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api, ApiError } from "@/lib/api";
 import { useLocale } from "@/lib/i18n/locale-provider";
+import { ENGLISH_VOICES, ZEROTTS_VOICES } from "@/lib/tts-service";
 import type { User } from "@/lib/types";
 import { cn } from "cn";
 

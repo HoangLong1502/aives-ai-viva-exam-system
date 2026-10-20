@@ -14,10 +14,61 @@ export const ZEROTTS_VOICES = [
   { id: "tiendat", label: "Tiến Đạt (Nam)", gender: "male" },
 ] as const;
 
+/**
+ * English reading voices.
+ * ZeroTTS ships Vietnamese speaker latents that also speak English (cross-lingual);
+ * see https://huggingface.co/danhcao/ZeroTTS — browser voices are offline fallbacks.
+ */
+export const ENGLISH_VOICES = [
+  ...ZEROTTS_VOICES.map((voice) => ({
+    id: voice.id,
+    label: `${voice.label} · English (ZeroTTS)`,
+    engine: "zerotts" as const,
+    lang: "en-US" as const,
+    prefer: [] as string[],
+  })),
+  {
+    id: "google-en-us",
+    label: "Google US English (browser fallback)",
+    engine: "browser" as const,
+    lang: "en-US" as const,
+    prefer: ["google us english", "google english", "en-us"],
+  },
+  {
+    id: "google-en-gb",
+    label: "Google UK English (browser fallback)",
+    engine: "browser" as const,
+    lang: "en-GB" as const,
+    prefer: ["google uk english", "google english", "en-gb"],
+  },
+  {
+    id: "microsoft-en-us",
+    label: "Microsoft US English (browser fallback)",
+    engine: "browser" as const,
+    lang: "en-US" as const,
+    prefer: ["microsoft", "zira", "david", "aria", "guy"],
+  },
+  {
+    id: "browser-en-us",
+    label: "Browser default (en-US)",
+    engine: "browser" as const,
+    lang: "en-US" as const,
+    prefer: [] as string[],
+  },
+] as const;
+
+export type EnglishVoiceId = (typeof ENGLISH_VOICES)[number]["id"];
+export type ZeroTtsVoiceId = (typeof ZEROTTS_VOICES)[number]["id"];
 export type SpeechLang = "vi-VN" | "en-US";
 
 const VIETNAMESE_CHARS =
   /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/i;
+
+const ENGLISH_VOICE_IDS = new Set(ENGLISH_VOICES.map((voice) => voice.id));
+const ZERO_VOICE_IDS = new Set(ZEROTTS_VOICES.map((voice) => voice.id));
+const BROWSER_ENGLISH_VOICE_IDS = new Set(
+  ENGLISH_VOICES.filter((voice) => voice.engine === "browser").map((voice) => voice.id),
+);
 
 /** Detect whether exam text should be spoken in Vietnamese or English. */
 export function detectSpeechLang(text: string): SpeechLang {
@@ -40,8 +91,41 @@ export function detectSpeechLang(text: string): SpeechLang {
   return "vi-VN";
 }
 
-export function defaultVoiceForLang(lang: SpeechLang, preferredViVoice = "maichi"): string {
-  return lang === "en-US" ? "google-en" : preferredViVoice;
+export function isEnglishVoice(id: string | null | undefined): boolean {
+  return !!id && ENGLISH_VOICE_IDS.has(id as EnglishVoiceId);
+}
+
+export function isBrowserEnglishVoice(id: string | null | undefined): boolean {
+  return !!id && BROWSER_ENGLISH_VOICE_IDS.has(id);
+}
+
+export function isZeroTtsVoice(id: string | null | undefined): boolean {
+  return !!id && ZERO_VOICE_IDS.has(id as ZeroTtsVoiceId);
+}
+
+export function normalizeViVoice(id: string | null | undefined): string {
+  return isZeroTtsVoice(id) ? (id as string) : "maichi";
+}
+
+export function normalizeEnVoice(id: string | null | undefined): string {
+  return isEnglishVoice(id) ? (id as string) : "maichi";
+}
+
+export function voiceLabel(id: string | null | undefined): string {
+  const english = ENGLISH_VOICES.find((voice) => voice.id === id);
+  if (english) return english.label;
+  const zero = ZEROTTS_VOICES.find((voice) => voice.id === id);
+  if (zero) return zero.label;
+  return id?.trim() || "maichi";
+}
+
+/** Pick the voice id to pass into playTTS for this utterance. */
+export function voiceForSpeech(
+  lang: SpeechLang,
+  viVoice = "maichi",
+  enVoice = "maichi",
+): string {
+  return lang === "en-US" ? normalizeEnVoice(enVoice) : normalizeViVoice(viVoice);
 }
 
 let currentAudio: HTMLAudioElement | null = null;
@@ -92,8 +176,9 @@ export type PlayTTSOptions = {
 
 /**
  * Phát âm thanh văn bản theo ngôn ngữ đề:
- * - Tiếng Việt: ưu tiên ZeroTTS (local), fallback Google vi-VN
- * - Tiếng Anh: dùng Google/Browser en-US (ZeroTTS chuyên tiếng Việt)
+ * - Tiếng Việt: ZeroTTS (local), fallback Google vi-VN
+ * - Tiếng Anh: ZeroTTS cross-lingual với giọng đã chọn, fallback browser English
+ *   (ZeroTTS docs: https://huggingface.co/danhcao/ZeroTTS)
  */
 export async function playTTS(
   text: string,
@@ -114,16 +199,18 @@ export async function playTTS(
   if (!cleanText) return () => {};
 
   const lang = langOption ?? detectSpeechLang(cleanText);
+  const useBrowserEnglish = lang === "en-US" && isBrowserEnglishVoice(voice);
 
-  // English exam questions always use browser Google English voice
-  if (lang === "en-US") {
+  if (useBrowserEnglish) {
     onEngineUsed?.("Browser-Google");
-    playBrowserTTS(cleanText, "en-US", onStart, onEnd, onError);
+    playBrowserTTS(cleanText, "en-US", voice, onStart, onEnd, onError);
     return () => stopTTS();
   }
 
   const zeroOnline = await checkZeroTTSStatus();
-  const zeroVoice = voice === "google-en" ? "maichi" : voice;
+  const zeroVoice = isZeroTtsVoice(voice) ? voice : "maichi";
+  const browserFallbackLang = lang === "en-US" ? "en-US" : "vi-VN";
+  const browserFallbackVoice = lang === "en-US" ? "google-en-us" : null;
 
   if (zeroOnline) {
     try {
@@ -146,7 +233,7 @@ export async function playTTS(
 
       audio.onerror = () => {
         currentAudio = null;
-        playBrowserTTS(cleanText, "vi-VN", onStart, onEnd, onError);
+        playBrowserTTS(cleanText, browserFallbackLang, browserFallbackVoice, onStart, onEnd, onError);
         onEngineUsed?.("Browser-Google");
       };
 
@@ -158,13 +245,14 @@ export async function playTTS(
   }
 
   onEngineUsed?.("Browser-Google");
-  playBrowserTTS(cleanText, "vi-VN", onStart, onEnd, onError);
+  playBrowserTTS(cleanText, browserFallbackLang, browserFallbackVoice, onStart, onEnd, onError);
   return () => stopTTS();
 }
 
 function playBrowserTTS(
   text: string,
   lang: "vi-VN" | "en-US",
+  preferredVoiceId: string | null,
   onStart?: () => void,
   onEnd?: () => void,
   onError?: (err?: unknown) => void
@@ -176,20 +264,31 @@ function playBrowserTTS(
 
   window.speechSynthesis.cancel();
 
+  const english = ENGLISH_VOICES.find((voice) => voice.id === preferredVoiceId);
+  const utteranceLang = english?.lang ?? lang;
+
   const utterance = new SpeechSynthesisUtterance(text);
-  utterance.lang = lang;
+  utterance.lang = utteranceLang;
   utterance.rate = 0.95;
   utterance.pitch = 1.0;
 
   function pickVoice() {
     const voices = window.speechSynthesis.getVoices();
+    if (english) {
+      const picked = pickEnglishVoice(voices, english);
+      if (picked) {
+        utterance.voice = picked;
+        utterance.lang = picked.lang || utteranceLang;
+        return;
+      }
+    }
     const googleVoice = voices.find(
       (v) =>
         v.name.toLowerCase().includes("google") &&
-        v.lang.toLowerCase().startsWith(lang.slice(0, 2))
+        v.lang.toLowerCase().startsWith(utteranceLang.slice(0, 2))
     );
     const langVoice = voices.find((v) =>
-      v.lang.toLowerCase().startsWith(lang.slice(0, 2))
+      v.lang.toLowerCase().startsWith(utteranceLang.slice(0, 2))
     );
     if (googleVoice) {
       utterance.voice = googleVoice;
@@ -209,4 +308,28 @@ function playBrowserTTS(
   utterance.onerror = (e) => onError?.(e);
 
   window.speechSynthesis.speak(utterance);
+}
+
+function pickEnglishVoice(
+  voices: SpeechSynthesisVoice[],
+  preferred: (typeof ENGLISH_VOICES)[number],
+): SpeechSynthesisVoice | undefined {
+  const langPrefix = preferred.lang.slice(0, 2).toLowerCase();
+  const langExact = preferred.lang.toLowerCase();
+  const sameLang = voices.filter((voice) => voice.lang.toLowerCase().startsWith(langPrefix));
+
+  for (const needle of preferred.prefer) {
+    const hit = sameLang.find((voice) => {
+      const name = voice.name.toLowerCase();
+      const lang = voice.lang.toLowerCase();
+      return name.includes(needle) || lang.includes(needle);
+    });
+    if (hit) return hit;
+  }
+
+  return (
+    sameLang.find((voice) => voice.lang.toLowerCase() === langExact) ||
+    sameLang.find((voice) => voice.name.toLowerCase().includes("google")) ||
+    sameLang[0]
+  );
 }

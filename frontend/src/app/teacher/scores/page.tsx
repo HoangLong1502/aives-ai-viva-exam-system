@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
-import { TeacherScoresView } from "@/components/teacher-scores-view";
+import { GradingCoursesView } from "@/components/teacher/grading-views";
 
 export const metadata: Metadata = { title: "Scores" };
 
 export default function TeacherScoresPage() {
-  return <TeacherScoresView />;
+  return <GradingCoursesView />;
 }

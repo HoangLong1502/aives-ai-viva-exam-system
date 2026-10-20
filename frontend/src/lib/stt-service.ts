@@ -8,7 +8,12 @@ export type UseSTTOptions = {
   onFinalResult?: (transcript: string) => void;
 };
 
-// Web Speech API interface definitions
+type SpeechAlternative = { transcript: string };
+
+type SpeechResult = SpeechAlternative[] & { isFinal?: boolean };
+
+type SpeechResultList = ArrayLike<SpeechResult>;
+
 interface SpeechRecognitionInstance extends EventTarget {
   continuous: boolean;
   interimResults: boolean;
@@ -23,7 +28,7 @@ interface SpeechRecognitionInstance extends EventTarget {
   onresult:
     | ((
         this: SpeechRecognitionInstance,
-        ev: { results: { [index: number]: { [index: number]: { transcript: string } }; length: number } }
+        ev: { results: SpeechResultList }
       ) => void)
     | null;
 }
@@ -39,6 +44,13 @@ function getSpeechRecognition(): SpeechRecognitionConstructor | null {
   return win.SpeechRecognition || win.webkitSpeechRecognition || null;
 }
 
+function joinSpeech(...parts: string[]) {
+  return parts
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join(" ");
+}
+
 export function useSTT(options: UseSTTOptions = {}) {
   const { lang = "vi-VN", continuous = true, onFinalResult } = options;
   const [isListening, setIsListening] = useState(false);
@@ -48,27 +60,41 @@ export function useSTT(options: UseSTTOptions = {}) {
 
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const onFinalResultRef = useRef(onFinalResult);
+  const wantListenRef = useRef(false);
+  const baseRef = useRef("");
+  const liveRef = useRef("");
+  const langRef = useRef(lang);
+  const continuousRef = useRef(continuous);
+  const restartTimerRef = useRef<number | null>(null);
+  const openRecognitionRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     onFinalResultRef.current = onFinalResult;
   }, [onFinalResult]);
 
-  const startListening = useCallback(() => {
-    const SpeechRecognition = getSpeechRecognition();
+  useEffect(() => {
+    langRef.current = lang;
+    continuousRef.current = continuous;
+  }, [lang, continuous]);
 
-    if (!SpeechRecognition) {
-      setError("Trình duyệt không hỗ trợ nhận diện giọng nói. Hãy dùng Google Chrome hoặc Microsoft Edge.");
-      return;
+  const openRecognition = useCallback(() => {
+    const SpeechRecognition = getSpeechRecognition();
+    if (!SpeechRecognition || !wantListenRef.current) return;
+
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.onend = null;
+        recognitionRef.current.abort();
+      } catch {
+        // Already stopped.
+      }
+      recognitionRef.current = null;
     }
 
     try {
-      if (recognitionRef.current) {
-        recognitionRef.current.abort();
-      }
-
       const recognition = new SpeechRecognition();
-      recognition.lang = lang;
-      recognition.continuous = continuous;
+      recognition.lang = langRef.current;
+      recognition.continuous = continuousRef.current;
       recognition.interimResults = true;
       recognition.maxAlternatives = 1;
 
@@ -78,57 +104,120 @@ export function useSTT(options: UseSTTOptions = {}) {
       };
 
       recognition.onresult = (event) => {
-        let fullTranscript = "";
+        let sessionFinal = "";
+        let interim = "";
         for (let i = 0; i < event.results.length; i++) {
-          fullTranscript += event.results[i][0].transcript;
+          const result = event.results[i];
+          const piece = result?.[0]?.transcript ?? "";
+          if (result?.isFinal) sessionFinal += piece;
+          else interim += piece;
         }
-        setTranscript(fullTranscript);
-        onFinalResultRef.current?.(fullTranscript);
+        const combined = joinSpeech(baseRef.current, sessionFinal, interim);
+        liveRef.current = combined;
+        setTranscript(combined);
+        if (sessionFinal.trim()) {
+          onFinalResultRef.current?.(combined);
+        }
       };
 
       recognition.onerror = (event) => {
-        console.warn("SpeechRecognition error:", event.error);
-        if (event.error === "not-allowed") {
+        if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+          wantListenRef.current = false;
+          setIsListening(false);
           setError("Microphone bị chặn. Vui lòng cho phép quyền truy cập Micro trên trình duyệt.");
-        } else if (event.error !== "no-speech") {
-          setError(`Lỗi STT: ${event.error}`);
+          return;
         }
-        setIsListening(false);
+        if (event.error !== "no-speech" && event.error !== "aborted") {
+          console.warn("SpeechRecognition error:", event.error);
+        }
       };
 
       recognition.onend = () => {
-        setIsListening(false);
+        baseRef.current = liveRef.current.trim();
+        if (!wantListenRef.current) {
+          setIsListening(false);
+          return;
+        }
+        if (restartTimerRef.current != null) {
+          window.clearTimeout(restartTimerRef.current);
+        }
+        restartTimerRef.current = window.setTimeout(() => {
+          restartTimerRef.current = null;
+          if (wantListenRef.current) openRecognitionRef.current?.();
+        }, 250);
       };
 
       recognitionRef.current = recognition;
       recognition.start();
     } catch (err: unknown) {
       console.error("Lỗi khi mở microphone:", err);
+      wantListenRef.current = false;
       setIsListening(false);
       setError("Không thể khởi động micro.");
     }
-  }, [lang, continuous]);
+  }, []);
+
+  useEffect(() => {
+    openRecognitionRef.current = openRecognition;
+  }, [openRecognition]);
+
+  const startListening = useCallback(() => {
+    const SpeechRecognition = getSpeechRecognition();
+    if (!SpeechRecognition) {
+      setError("Trình duyệt không hỗ trợ nhận diện giọng nói. Hãy dùng Google Chrome hoặc Microsoft Edge.");
+      return;
+    }
+    if (restartTimerRef.current != null) {
+      window.clearTimeout(restartTimerRef.current);
+      restartTimerRef.current = null;
+    }
+    wantListenRef.current = true;
+    baseRef.current = "";
+    liveRef.current = "";
+    setTranscript("");
+    setError(null);
+    openRecognition();
+  }, [openRecognition]);
 
   const stopListening = useCallback(() => {
-    if (recognitionRef.current) {
+    wantListenRef.current = false;
+    if (restartTimerRef.current != null) {
+      window.clearTimeout(restartTimerRef.current);
+      restartTimerRef.current = null;
+    }
+    const recognition = recognitionRef.current;
+    recognitionRef.current = null;
+    if (recognition) {
       try {
-        recognitionRef.current.stop();
+        recognition.onend = null;
+        recognition.abort();
       } catch {
         // Ignored
       }
-      setIsListening(false);
     }
+    setIsListening(false);
   }, []);
 
   const resetTranscript = useCallback(() => {
+    baseRef.current = "";
+    liveRef.current = "";
     setTranscript("");
     setError(null);
   }, []);
 
   useEffect(() => {
     return () => {
+      wantListenRef.current = false;
+      if (restartTimerRef.current != null) {
+        window.clearTimeout(restartTimerRef.current);
+      }
       if (recognitionRef.current) {
-        recognitionRef.current.abort();
+        try {
+          recognitionRef.current.onend = null;
+          recognitionRef.current.abort();
+        } catch {
+          // Ignored
+        }
       }
     };
   }, []);

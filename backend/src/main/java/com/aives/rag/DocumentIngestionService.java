@@ -389,6 +389,32 @@ public class DocumentIngestionService {
         );
     }
 
+    /** Course materials for the viva grader, without restricting to one uploader. */
+    public List<VivaQuestionGenerator.Passage> retrieveForCourse(String courseId, String query, int limit) {
+        if (courseId == null || courseId.isBlank() || query == null || query.isBlank() || limit <= 0) {
+            return List.of();
+        }
+        float[] vector = embeddings.embed(query);
+        String literal = VectorLiteral.format(vector);
+        return jdbc.query(
+                """
+                SELECT c.title, c.source_label, c.content
+                FROM knowledge_chunk c
+                JOIN course_document d ON d.id = c.document_id
+                WHERE d.course_id = ?::uuid AND d.extraction_status = 'DONE'
+                ORDER BY c.embedding <=> ?::vector
+                LIMIT ?
+                """,
+                (rs, row) -> new VivaQuestionGenerator.Passage(
+                        rs.getString("title") + ", " + rs.getString("source_label"),
+                        rs.getString("content")
+                ),
+                courseId,
+                literal,
+                limit
+        );
+    }
+
     private Optional<String> activeDuplicate(String teacherId, String subjectId, String hash) {
         List<String> names = jdbc.query(
                 """

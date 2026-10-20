@@ -210,6 +210,10 @@ CREATE TABLE answer (
   is_sufficient boolean,
   feedback text,
   evaluator varchar(20),
+  teacher_score numeric(5,2),
+  teacher_feedback text,
+  graded_by uuid,
+  graded_at timestamptz,
   answered_at timestamptz NOT NULL DEFAULT now()
 );
 
