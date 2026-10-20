@@ -159,8 +159,7 @@ export function TeacherTests() {
       })
       .catch(() => {
         if (!cancelled) setMaterialCount(0);
-      }
-    })();
+      });
     return () => {
       cancelled = true;
     };

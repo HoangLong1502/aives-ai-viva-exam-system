@@ -1,22 +1,16 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import { CalendarClockIcon } from "lucide-react";
+import { PencilIcon, Trash2Icon, XIcon } from "lucide-react";
 import { toast } from "sonner";
+import { ExamSchedule } from "@/components/admin/settings/exam-schedule";
 import { ErrorState, LoadingSkeleton, PageHeader } from "@/components/admin/ui/dashboard-ui";
 import { SelectControl } from "@/components/admin/ui/controls";
+import { ConfirmDialog } from "@/components/teacher/confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  examStatusCounts,
-  examStatusPresentation,
-  fetchAdminStats,
-  parseAdminStats,
-  type AdminStats,
-  type CountedExamStatus,
-} from "@/lib/admin/dashboard";
 import { api, ApiError } from "@/lib/api";
 import { useLocale } from "@/lib/i18n/locale-provider";
 import type { User } from "@/lib/types";
@@ -24,6 +18,9 @@ import { cn } from "cn";
 
 type Subject = { id: string; code: string; name: string; teacherIds: string[] };
 type Tab = "schedule" | "config";
+type PendingAction =
+  | { kind: "unassign"; subject: Subject; teacherId: string }
+  | { kind: "delete"; subject: Subject };
 
 export function AdminSettings() {
   const { t, messages } = useLocale();
@@ -38,6 +35,12 @@ export function AdminSettings() {
   const [fieldErrors, setFieldErrors] = useState<{ code?: string; name?: string }>({});
   const [savingSubject, setSavingSubject] = useState(false);
   const [assigningId, setAssigningId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editCode, setEditCode] = useState("");
+  const [editName, setEditName] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [pending, setPending] = useState<PendingAction | null>(null);
+  const [confirming, setConfirming] = useState(false);
 
   const load = useCallback((signal: AbortSignal) => {
     return Promise.all([
@@ -62,6 +65,8 @@ export function AdminSettings() {
     return () => controller.abort();
   }, [load, reloadKey, copy.loadError]);
 
+  const reload = () => setReloadKey((current) => current + 1);
+
   async function createSubject(event: FormEvent) {
     event.preventDefault();
     const nextErrors: { code?: string; name?: string } = {};
@@ -80,7 +85,7 @@ export function AdminSettings() {
       setCode("");
       setName("");
       setFieldErrors({});
-      setReloadKey((current) => current + 1);
+      reload();
     } catch (reason) {
       toast.error(reason instanceof ApiError ? reason.message : copy.addError);
     } finally {
@@ -98,7 +103,7 @@ export function AdminSettings() {
         body: { subjectId, teacherId },
       });
       toast.success(copy.assigned);
-      setReloadKey((current) => current + 1);
+      reload();
     } catch (reason) {
       toast.error(reason instanceof ApiError ? reason.message : copy.assignError);
     } finally {
@@ -106,7 +111,60 @@ export function AdminSettings() {
     }
   }
 
-  const teacherName = (id: string) => teachers.find((teacher) => teacher.id === id)?.name;
+  function startEditing(subject: Subject) {
+    setEditingId(subject.id);
+    setEditCode(subject.code);
+    setEditName(subject.name);
+  }
+
+  async function saveEdit(event: FormEvent, subjectId: string) {
+    event.preventDefault();
+    if (!editCode.trim() || !editName.trim()) {
+      toast.error(copy.required);
+      return;
+    }
+    setSavingEdit(true);
+    try {
+      await api(`/api/admin/subjects/${subjectId}`, {
+        method: "PATCH",
+        auth: true,
+        body: { code: editCode.trim(), name: editName.trim() },
+      });
+      toast.success(copy.subjectUpdated);
+      setEditingId(null);
+      reload();
+    } catch (reason) {
+      toast.error(reason instanceof ApiError ? reason.message : copy.updateError);
+    } finally {
+      setSavingEdit(false);
+    }
+  }
+
+  async function confirmPending() {
+    if (!pending) return;
+    setConfirming(true);
+    try {
+      if (pending.kind === "unassign") {
+        await api(`/api/admin/subjects/${pending.subject.id}/teachers/${pending.teacherId}`, {
+          method: "DELETE",
+          auth: true,
+        });
+        toast.success(copy.unassigned);
+      } else {
+        await api(`/api/admin/subjects/${pending.subject.id}`, { method: "DELETE", auth: true });
+        toast.success(copy.subjectDeleted);
+      }
+      reload();
+    } catch (reason) {
+      const fallback = pending.kind === "unassign" ? copy.unassignError : copy.deleteError;
+      toast.error(reason instanceof ApiError ? reason.message : fallback);
+    } finally {
+      setConfirming(false);
+      setPending(null);
+    }
+  }
+
+  const teacherName = (id: string) => teachers.find((teacher) => teacher.id === id)?.name ?? copy.unknownTeacher;
 
   return (
     <div className="min-w-0 space-y-8">
@@ -151,212 +209,198 @@ export function AdminSettings() {
       </div>
 
       <div id="settings-config" role="tabpanel" hidden={tab !== "config"} className="space-y-8">
-      {error && subjects === null ? (
-        <ErrorState
-          title={copy.loadError}
-          message={error}
-          retryLabel={copy.retry}
-          onRetry={() => setReloadKey((current) => current + 1)}
-        />
-      ) : subjects === null ? (
-        <LoadingSkeleton className="h-64 w-full" label={copy.loading} />
-      ) : (
-        <>
-          {error ? (
-            <ErrorState
-              title={copy.loadError}
-              message={error}
-              retryLabel={copy.retry}
-              onRetry={() => setReloadKey((current) => current + 1)}
-            />
-          ) : null}
-          <Card className="min-w-0">
-            <CardHeader className="border-b">
-              <CardTitle className="font-serif text-2xl">{copy.subjectsTitle}</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <form className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-start" onSubmit={createSubject}>
-                <div className="grid gap-1.5">
-                  <Label htmlFor="subject-code">{copy.codeLabel}</Label>
-                  <Input
-                    id="subject-code"
-                    value={code}
-                    aria-invalid={Boolean(fieldErrors.code)}
-                    placeholder={copy.codePlaceholder}
-                    onChange={(event) => {
-                      setCode(event.target.value);
-                      setFieldErrors((current) => ({ ...current, code: undefined }));
-                    }}
-                  />
-                  {fieldErrors.code ? <p className="text-sm text-destructive">{fieldErrors.code}</p> : null}
-                </div>
-                <div className="grid gap-1.5">
-                  <Label htmlFor="subject-name">{copy.nameLabel}</Label>
-                  <Input
-                    id="subject-name"
-                    value={name}
-                    aria-invalid={Boolean(fieldErrors.name)}
-                    placeholder={copy.namePlaceholder}
-                    onChange={(event) => {
-                      setName(event.target.value);
-                      setFieldErrors((current) => ({ ...current, name: undefined }));
-                    }}
-                  />
-                  {fieldErrors.name ? <p className="text-sm text-destructive">{fieldErrors.name}</p> : null}
-                </div>
-                <Button type="submit" className="sm:mt-6" disabled={savingSubject}>
-                  {savingSubject ? copy.saving : copy.add}
-                </Button>
-              </form>
-              {subjects.length === 0 ? (
-                <p className="text-sm text-muted-foreground">{copy.emptySubjects}</p>
-              ) : (
-                <ul className="divide-y rounded-xl border">
-                  {subjects.map((subject) => {
-                    const available = teachers.filter((teacher) => !subject.teacherIds.includes(teacher.id));
-                    return (
-                      <li
-                        key={subject.id}
-                        className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
-                      >
-                        <div className="min-w-0 space-y-1.5">
-                          <p className="font-medium">
-                            {subject.code} — {subject.name}
-                          </p>
-                          {subject.teacherIds.length === 0 ? (
-                            <p className="text-sm text-muted-foreground">{copy.noTeacher}</p>
-                          ) : (
-                            <ul
-                              className="flex flex-wrap gap-1.5"
-                              aria-label={t("admin.settings.teachersAssigned", {
-                                count: String(subject.teacherIds.length),
-                              })}
-                            >
-                              {subject.teacherIds.map((id) => (
-                                <li
-                                  key={id}
-                                  className="rounded-md bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground"
-                                >
-                                  {teacherName(id) ?? copy.unknownTeacher}
-                                </li>
-                              ))}
-                            </ul>
-                          )}
-                        </div>
-                        <SelectControl
-                          className="w-full sm:w-56"
-                          value=""
-                          aria-label={copy.assignTeacher}
-                          disabled={available.length === 0 || assigningId === subject.id}
-                          onChange={(event) => void assign(subject.id, event.target.value)}
-                        >
-                          <option value="">{copy.assignTeacher}</option>
-                          {available.map((teacher) => (
-                            <option key={teacher.id} value={teacher.id}>
-                              {teacher.name}
-                            </option>
-                          ))}
-                        </SelectControl>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </CardContent>
-          </Card>
-        </>
-      )}
-      </div>
-    </div>
-  );
-}
-
-const STATUS_LABEL_KEY = {
-  SCHEDULED: "scheduled",
-  IN_PROGRESS: "inProgress",
-  COMPLETED: "completed",
-} as const satisfies Record<CountedExamStatus, string>;
-
-function ExamSchedule() {
-  const { t, messages } = useLocale();
-  const copy = messages.admin.settings;
-  const [stats, setStats] = useState<AdminStats | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [reloadKey, setReloadKey] = useState(0);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    fetchAdminStats(controller.signal)
-      .then((value) => {
-        if (controller.signal.aborted) return;
-        setStats(parseAdminStats(value));
-        setError(null);
-      })
-      .catch((reason) => {
-        if (controller.signal.aborted) return;
-        setError(reason instanceof ApiError ? reason.message : copy.scheduleLoadError);
-      });
-    return () => controller.abort();
-  }, [reloadKey, copy.scheduleLoadError]);
-
-  return (
-    <div className="space-y-8">
-      <Card className="min-w-0">
-        <CardHeader className="border-b">
-          <CardTitle className="font-serif text-2xl">{copy.scheduleTitle}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {error && stats === null ? (
-            <ErrorState
-              title={copy.scheduleLoadError}
-              message={error}
-              retryLabel={copy.retry}
-              onRetry={() => setReloadKey((current) => current + 1)}
-            />
-          ) : stats === null ? (
-            <LoadingSkeleton className="h-28 w-full" label={copy.loading} />
-          ) : (
-            <ul className="grid gap-3 sm:grid-cols-3">
-              {examStatusCounts(stats).map((row) => (
-                <li key={row.status} className="rounded-xl bg-card p-4 ring-1 ring-foreground/10">
-                  <span className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <span
-                      className={cn("size-2 rounded-full", examStatusPresentation(row.status).barClass)}
-                      aria-hidden
+        {error && subjects === null ? (
+          <ErrorState title={copy.loadError} message={error} retryLabel={copy.retry} onRetry={reload} />
+        ) : subjects === null ? (
+          <LoadingSkeleton className="h-64 w-full" label={copy.loading} />
+        ) : (
+          <>
+            {error ? (
+              <ErrorState title={copy.loadError} message={error} retryLabel={copy.retry} onRetry={reload} />
+            ) : null}
+            <Card className="min-w-0">
+              <CardHeader className="border-b">
+                <CardTitle className="font-serif text-2xl">{copy.subjectsTitle}</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <form className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-start" onSubmit={createSubject}>
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="subject-code">{copy.codeLabel}</Label>
+                    <Input
+                      id="subject-code"
+                      value={code}
+                      aria-invalid={Boolean(fieldErrors.code)}
+                      placeholder={copy.codePlaceholder}
+                      onChange={(event) => {
+                        setCode(event.target.value);
+                        setFieldErrors((current) => ({ ...current, code: undefined }));
+                      }}
                     />
-                    {copy[STATUS_LABEL_KEY[row.status]]}
-                  </span>
-                  <span className="mt-3 block font-serif text-3xl tabular-nums tracking-tight">
-                    {row.total.toLocaleString()}
-                  </span>
-                  <span className="mt-2 block text-xs leading-5 text-muted-foreground">
-                    {t("admin.settings.formatSplit", {
-                      multipleChoice: String(row.multipleChoice),
-                      oral: String(row.oral),
+                    {fieldErrors.code ? <p className="text-sm text-destructive">{fieldErrors.code}</p> : null}
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="subject-name">{copy.nameLabel}</Label>
+                    <Input
+                      id="subject-name"
+                      value={name}
+                      aria-invalid={Boolean(fieldErrors.name)}
+                      placeholder={copy.namePlaceholder}
+                      onChange={(event) => {
+                        setName(event.target.value);
+                        setFieldErrors((current) => ({ ...current, name: undefined }));
+                      }}
+                    />
+                    {fieldErrors.name ? <p className="text-sm text-destructive">{fieldErrors.name}</p> : null}
+                  </div>
+                  <Button type="submit" className="sm:mt-6" disabled={savingSubject}>
+                    {savingSubject ? copy.saving : copy.add}
+                  </Button>
+                </form>
+                {subjects.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">{copy.emptySubjects}</p>
+                ) : (
+                  <ul className="divide-y rounded-xl border">
+                    {subjects.map((subject) => {
+                      const available = teachers.filter((teacher) => !subject.teacherIds.includes(teacher.id));
+                      const editing = editingId === subject.id;
+                      return (
+                        <li
+                          key={subject.id}
+                          className="flex flex-col gap-3 px-4 py-3 lg:flex-row lg:items-center lg:justify-between"
+                        >
+                          <div className="min-w-0 flex-1 space-y-1.5">
+                            {editing ? (
+                              <form
+                                className="flex flex-col gap-2 sm:flex-row sm:items-center"
+                                onSubmit={(event) => void saveEdit(event, subject.id)}
+                              >
+                                <Input
+                                  value={editCode}
+                                  aria-label={copy.codeLabel}
+                                  className="sm:w-32"
+                                  onChange={(event) => setEditCode(event.target.value)}
+                                />
+                                <Input
+                                  value={editName}
+                                  aria-label={copy.nameLabel}
+                                  className="sm:max-w-xs"
+                                  onChange={(event) => setEditName(event.target.value)}
+                                />
+                                <div className="flex gap-2">
+                                  <Button type="submit" size="sm" disabled={savingEdit}>
+                                    {savingEdit ? copy.saving : copy.saveSubject}
+                                  </Button>
+                                  <Button type="button" size="sm" variant="ghost" onClick={() => setEditingId(null)}>
+                                    {copy.cancel}
+                                  </Button>
+                                </div>
+                              </form>
+                            ) : (
+                              <p className="font-medium">
+                                {subject.code} — {subject.name}
+                              </p>
+                            )}
+                            {subject.teacherIds.length === 0 ? (
+                              <p className="text-sm text-muted-foreground">{copy.noTeacher}</p>
+                            ) : (
+                              <ul
+                                className="flex flex-wrap gap-1.5"
+                                aria-label={t("admin.settings.teachersAssigned", {
+                                  count: String(subject.teacherIds.length),
+                                })}
+                              >
+                                {subject.teacherIds.map((id) => (
+                                  <li
+                                    key={id}
+                                    className="inline-flex items-center gap-1 rounded-md bg-muted py-0.5 pr-1 pl-2 text-xs font-medium text-muted-foreground"
+                                  >
+                                    {teacherName(id)}
+                                    <button
+                                      type="button"
+                                      className="rounded-sm p-0.5 hover:bg-foreground/10 hover:text-destructive focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+                                      aria-label={t("admin.settings.unassignTeacher", {
+                                        name: teacherName(id),
+                                        subject: subject.code,
+                                      })}
+                                      onClick={() => setPending({ kind: "unassign", subject, teacherId: id })}
+                                    >
+                                      <XIcon className="size-3" aria-hidden />
+                                    </button>
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <SelectControl
+                              className="w-full lg:w-56"
+                              value=""
+                              aria-label={copy.assignTeacher}
+                              disabled={available.length === 0 || assigningId === subject.id}
+                              onChange={(event) => void assign(subject.id, event.target.value)}
+                            >
+                              <option value="">
+                                {available.length === 0 ? copy.allAssigned : copy.assignTeacher}
+                              </option>
+                              {available.map((teacher) => (
+                                <option key={teacher.id} value={teacher.id}>
+                                  {teacher.name}
+                                </option>
+                              ))}
+                            </SelectControl>
+                            <Button
+                              type="button"
+                              size="icon-sm"
+                              variant="ghost"
+                              aria-label={t("admin.settings.editSubject", { code: subject.code })}
+                              title={t("admin.settings.editSubject", { code: subject.code })}
+                              onClick={() => (editing ? setEditingId(null) : startEditing(subject))}
+                            >
+                              <PencilIcon aria-hidden />
+                            </Button>
+                            <Button
+                              type="button"
+                              size="icon-sm"
+                              variant="ghost"
+                              className="text-destructive hover:text-destructive"
+                              aria-label={t("admin.settings.deleteSubject", { code: subject.code })}
+                              title={t("admin.settings.deleteSubject", { code: subject.code })}
+                              onClick={() => setPending({ kind: "delete", subject })}
+                            >
+                              <Trash2Icon aria-hidden />
+                            </Button>
+                          </div>
+                        </li>
+                      );
                     })}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
+                  </ul>
+                )}
+              </CardContent>
+            </Card>
+          </>
+        )}
+      </div>
 
-      <Card className="min-w-0">
-        <CardHeader className="border-b">
-          <CardTitle className="font-serif text-2xl">{copy.sessionsTitle}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed px-6 py-10 text-center">
-            <span className="flex size-10 items-center justify-center rounded-full bg-muted">
-              <CalendarClockIcon className="size-5 text-muted-foreground" aria-hidden />
-            </span>
-            <div className="space-y-1">
-              <p className="font-medium">{copy.sessionsEmptyTitle}</p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      <ConfirmDialog
+        open={pending !== null}
+        title={pending?.kind === "delete" ? copy.confirmDeleteTitle : copy.confirmUnassignTitle}
+        description={
+          pending?.kind === "delete"
+            ? t("admin.settings.confirmDelete", { subject: `${pending.subject.code} — ${pending.subject.name}` })
+            : pending
+              ? t("admin.settings.confirmUnassign", {
+                  name: teacherName(pending.teacherId),
+                  subject: pending.subject.code,
+                })
+              : undefined
+        }
+        confirmLabel={pending?.kind === "delete" ? copy.confirmDeleteAction : copy.confirmUnassignAction}
+        cancelLabel={copy.cancel}
+        destructive
+        confirming={confirming}
+        onConfirm={() => void confirmPending()}
+        onCancel={() => setPending(null)}
+      />
     </div>
   );
 }
