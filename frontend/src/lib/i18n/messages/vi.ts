@@ -164,7 +164,7 @@ export const vi: Messages = {
         import: "Import",
       },
       examFormat: {
-        oral: "Viva miệng",
+        oral: "Kiểm tra bằng giọng nói",
         multipleChoice: "Trắc nghiệm",
       },
       attemptStatus: {
@@ -463,7 +463,7 @@ export const vi: Messages = {
       eyebrow: "Sinh viên",
       title: "Bài kiểm tra đang mở",
       lead: "Ca thi vấn đáp. Hệ thống đọc câu hỏi, bạn trả lời bằng giọng nói, và giám khảo AI hỏi tiếp hoặc chuyển câu.",
-      oral: "Viva miệng",
+      oral: "Kiểm tra bằng giọng nói",
       multipleChoice: "Trắc nghiệm",
       score: "Điểm",
       open: "Mở lại",
