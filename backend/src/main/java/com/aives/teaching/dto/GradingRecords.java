@@ -72,6 +72,7 @@ public final class GradingRecords {
     public record QuestionGrading(
             String questionId,
             int number,
+            double maxPoints,
             String prompt,
             String expectedAnswer,
             String keyPoints,
@@ -93,7 +94,6 @@ public final class GradingRecords {
             String studentCode,
             String status,
             Integer score,
-            double pointsPerQuestion,
             List<QuestionGrading> questions
     ) {
     }

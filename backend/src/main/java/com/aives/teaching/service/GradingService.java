@@ -95,7 +95,7 @@ public class GradingService {
         AttemptGrading full = grading(header, attemptId);
         List<QuestionGrading> questions = full.questions().stream()
                 .map(question -> new QuestionGrading(
-                        question.questionId(), question.number(), question.prompt(), null, null,
+                        question.questionId(), question.number(), question.maxPoints(), question.prompt(), null, null,
                         question.answered(), question.aiScore(), question.teacherScore(), question.teacherFeedback(),
                         question.turns().stream()
                                 .map(turn -> new TurnItem(
@@ -105,26 +105,25 @@ public class GradingService {
                 .toList();
         return new AttemptGrading(
                 full.attemptId(), full.examId(), full.examTitle(), full.courseId(), full.courseName(),
-                full.studentName(), full.studentCode(), full.status(), full.score(), full.pointsPerQuestion(),
-                questions);
+                full.studentName(), full.studentCode(), full.status(), full.score(), questions);
     }
 
     private AttemptGrading grading(AttemptHeader header, String attemptId) {
         List<QuestionItem> examQuestions = desk.questionsOnExam(header.examId());
         Map<String, List<TurnRow>> turnsByQuestion = grading.turns(attemptId).stream()
                 .collect(Collectors.groupingBy(TurnRow::questionId, LinkedHashMap::new, Collectors.toList()));
+        double[] maxPoints = AttemptScoring.allocation(examQuestions.size());
         List<QuestionGrading> questions = new ArrayList<>();
         for (int index = 0; index < examQuestions.size(); index++) {
             QuestionItem question = examQuestions.get(index);
-            questions.add(toQuestionGrading(index + 1, question, turnsByQuestion.getOrDefault(question.id(), List.of())));
+            questions.add(toQuestionGrading(index + 1, maxPoints[index], question, turnsByQuestion.getOrDefault(question.id(), List.of())));
         }
         return new AttemptGrading(
                 header.attemptId(), header.examId(), header.examTitle(), header.courseId(), header.courseName(),
-                header.studentName(), header.studentCode(), header.status(), header.score(),
-                AttemptScoring.pointsPerQuestion(examQuestions.size()), questions);
+                header.studentName(), header.studentCode(), header.status(), header.score(), questions);
     }
 
-    private static QuestionGrading toQuestionGrading(int number, QuestionItem question, List<TurnRow> rows) {
+    private static QuestionGrading toQuestionGrading(int number, double maxPoints, QuestionItem question, List<TurnRow> rows) {
         List<TurnItem> turns = rows.stream()
                 .map(row -> new TurnItem(
                         row.turnId(), row.turnNo(), row.turnType(), row.questionText(), row.transcript(),
@@ -139,23 +138,29 @@ public class GradingService {
                 .findFirst()
                 .orElse(null);
         return new QuestionGrading(
-                question.id(), number, question.prompt(), question.expectedAnswer(), question.keyPoints(),
+                question.id(), number, maxPoints, question.prompt(), question.expectedAnswer(), question.keyPoints(),
                 rows.stream().anyMatch(TurnRow::answered), ai, teacherScore, feedback, turns);
     }
 
     /**
      * Saves the teacher's mark for one question, given in points out of the question's share of the exam
-     * (100 split equally across the exam's questions). The mark covers the main turn and its follow-ups.
+     * (see {@link AttemptScoring#allocation}). The mark covers the main turn and its follow-ups.
      */
     @Transactional
     public GradedAttemptResult markQuestion(
             PublicUser teacher, String attemptId, String questionId, double points, String feedback) {
         AttemptHeader header = requireAttempt(teacher, attemptId);
         List<QuestionItem> examQuestions = desk.questionsOnExam(header.examId());
-        if (examQuestions.stream().noneMatch(question -> question.id().equals(questionId))) {
+        int position = -1;
+        for (int index = 0; index < examQuestions.size(); index++) {
+            if (examQuestions.get(index).id().equals(questionId)) {
+                position = index;
+            }
+        }
+        if (position < 0) {
             throw new ApiException(HttpStatus.NOT_FOUND, "Question not found on this exam");
         }
-        double max = AttemptScoring.pointsPerQuestion(examQuestions.size());
+        double max = AttemptScoring.allocation(examQuestions.size())[position];
         if (Double.isNaN(points) || points < 0 || points > max) {
             throw new ApiException(
                     HttpStatus.BAD_REQUEST,

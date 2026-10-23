@@ -363,7 +363,6 @@ function VivaExamRoom({
   const { isListening, transcript, startListening, stopListening, resetTranscript, isSupported, error: sttError } =
     useSTT({ lang: speechLang });
 
-  const [typedAnswer, setTypedAnswer] = useState("");
   const runRef = useRef(0);
   const phaseRef = useRef<Phase>(phase);
   const indexRef = useRef(currentIndex);
@@ -1012,30 +1011,6 @@ function VivaExamRoom({
                 <p className="mt-2 text-xs text-muted-foreground">{t("student.tests.speakDoneHint")}</p>
               ) : null}
             </div>
-          ) : null}
-
-          {process.env.NODE_ENV !== "production" && phase === "listening" ? (
-            <form
-              className="flex gap-2"
-              onSubmit={(event) => {
-                event.preventDefault();
-                const text = typedAnswer.trim();
-                if (!text) return;
-                setTypedAnswer("");
-                stopListening();
-                void submitAnswer(text);
-              }}
-            >
-              <input
-                value={typedAnswer}
-                onChange={(event) => setTypedAnswer(event.target.value)}
-                placeholder="Dev only: type an answer instead of speaking"
-                className="h-9 min-w-0 flex-1 rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-              />
-              <Button type="submit" variant="outline" size="sm" disabled={!typedAnswer.trim()}>
-                Send
-              </Button>
-            </form>
           ) : null}
 
           {sttError ? <p className="text-xs text-destructive">{sttError}</p> : null}

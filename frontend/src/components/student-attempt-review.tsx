@@ -24,6 +24,7 @@ type Turn = {
 type ReviewQuestion = {
   questionId: string;
   number: number;
+  maxPoints: number;
   prompt: string;
   answered: boolean;
   aiScore: number | null;
@@ -37,11 +38,10 @@ type Review = {
   examTitle: string;
   courseName: string;
   score: number | null;
-  pointsPerQuestion: number;
   questions: ReviewQuestion[];
 };
 
-/** Scores are stored 0-100 per question; the exam shares 100 points across its questions. */
+/** Scores are stored 0-100 per question; each question is worth its own share of the exam's 100 points. */
 function points(score: number | null, perQuestion: number) {
   if (score == null) return null;
   return Math.round((score / 100) * perQuestion * 10) / 10;
@@ -111,7 +111,7 @@ export function StudentAttemptReview({ attemptId }: { attemptId: string }) {
       <ol className="space-y-5">
         {review.questions.map((question) => {
           const graded = question.teacherScore != null;
-          const earned = points(question.teacherScore ?? question.aiScore, review.pointsPerQuestion);
+          const earned = points(question.teacherScore ?? question.aiScore, question.maxPoints);
           return (
             <li key={question.questionId}>
               <Card>
@@ -136,7 +136,7 @@ export function StudentAttemptReview({ attemptId }: { attemptId: string }) {
                       />
                       <p className="font-serif text-2xl tabular-nums">
                         {earned ?? "—"}
-                        <span className="text-sm text-muted-foreground"> / {review.pointsPerQuestion}</span>
+                        <span className="text-sm text-muted-foreground"> / {question.maxPoints}</span>
                       </p>
                     </div>
                   </div>

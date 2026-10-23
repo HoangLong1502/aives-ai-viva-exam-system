@@ -69,6 +69,7 @@ type TurnRow = {
 type QuestionRow = {
   questionId: string;
   number: number;
+  maxPoints: number;
   prompt: string;
   expectedAnswer: string | null;
   keyPoints: string | null;
@@ -89,7 +90,6 @@ type AttemptGrading = {
   studentCode: string;
   status: string;
   score: number | null;
-  pointsPerQuestion: number;
   questions: QuestionRow[];
 };
 
@@ -413,7 +413,7 @@ export function GradingAttemptView({
               key={question.questionId}
               question={question}
               attemptId={data.attemptId}
-              maxPoints={data.pointsPerQuestion}
+              maxPoints={question.maxPoints}
               onSaved={reload}
             />
           ))}
