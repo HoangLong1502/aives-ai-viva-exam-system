@@ -23,7 +23,11 @@ import {
   detectSpeechLang,
   normalizeEnVoice,
   normalizeViVoice,
+  cancelExamPrefetch,
+  holdExamPrefetch,
   playTTS,
+  releaseExamPrefetch,
+  prefetchExamLines,
   stopTTS,
   voiceForSpeech,
   type SpeechLang,
@@ -152,21 +156,25 @@ function interpretChoice(raw: string): "continue" | "next" | null {
 function speakLine(text: string, viVoice: string, enVoice: string) {
   return new Promise<void>((resolve) => {
     let settled = false;
-    // Browser speech synthesis sometimes never fires onend (no voice installed, long utterance, background
-    // tab). Without this the exam would wait on the examiner forever, so give up a little after the line
-    // should have finished.
     const words = text.trim().split(/\s+/).length;
-    const fallback = window.setTimeout(() => finish(), 4000 + words * 450);
+    // ZeroTTS synthesizes before any sound. The safety timer starts once playback begins,
+    // and a longer one covers synthesis so the line is not cut off while the server is still working.
+    let timer = 0;
     const finish = () => {
       if (settled) return;
       settled = true;
-      window.clearTimeout(fallback);
+      window.clearTimeout(timer);
       resolve();
     };
+    timer = window.setTimeout(finish, 60_000);
     const lang = detectSpeechLang(text);
     void playTTS(text, {
       voice: voiceForSpeech(lang, viVoice, enVoice),
       lang,
+      onStart: () => {
+        window.clearTimeout(timer);
+        timer = window.setTimeout(finish, 20000 + words * 800);
+      },
       onEnd: finish,
       onError: finish,
     });
@@ -459,18 +467,25 @@ function VivaExamRoom({
     stopListeningRef.current();
     setExamPhase("speaking");
     const lang = detectSpeechLang(text);
+    const words = text.trim().split(/\s+/).length;
     // Same guard as speakLine: carry on even if the speech engine never reports that it finished.
     let done = false;
+    let timer = 0;
     const begin = () => {
-      if (done) return;
+      if (done || run !== runRef.current) return;
       done = true;
-      window.clearTimeout(fallback);
+      window.clearTimeout(timer);
       beginAfterSpeech(run, after);
     };
-    const fallback = window.setTimeout(begin, 4000 + text.trim().split(/\s+/).length * 450);
+    timer = window.setTimeout(begin, 60_000);
     void playTTS(text, {
       voice: voiceForSpeech(lang, voiceRef.current, enVoiceRef.current),
       lang,
+      onStart: () => {
+        if (run !== runRef.current) return;
+        window.clearTimeout(timer);
+        timer = window.setTimeout(begin, 20000 + words * 800);
+      },
       onEnd: begin,
       onError: begin,
     });
@@ -485,8 +500,21 @@ function VivaExamRoom({
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      cancelExamPrefetch();
     };
   }, []);
+
+  useEffect(() => {
+    if (!voiceReady || questions.length === 0) return;
+    const ordered = [
+      questions[currentIndex],
+      ...questions.filter((_, index) => index !== currentIndex),
+    ].filter((question) => question != null);
+    prefetchExamLines(ordered.map((question) => ({
+      text: question.prompt,
+      voice: voiceForSpeech(detectSpeechLang(question.prompt), activeVoice, activeEnVoice),
+    })));
+  }, [voiceReady, questions, activeVoice, activeEnVoice, currentIndex]);
 
   useEffect(() => {
     let cancelled = false;
@@ -504,29 +532,6 @@ function VivaExamRoom({
       cancelled = true;
     };
   }, []);
-
-  useEffect(() => {
-    if (phase !== "countdown" || !navigator.mediaDevices?.getUserMedia) return;
-    let cancelled = false;
-    let stream: MediaStream | null = null;
-    navigator.mediaDevices
-      .getUserMedia({ audio: true })
-      .then((next) => {
-        if (cancelled) {
-          next.getTracks().forEach((track) => track.stop());
-          return;
-        }
-        stream = next;
-        next.getTracks().forEach((track) => track.stop());
-      })
-      .catch(() => {
-        // Speech recognition will surface the permission error when listening starts.
-      });
-    return () => {
-      cancelled = true;
-      stream?.getTracks().forEach((track) => track.stop());
-    };
-  }, [phase, currentIndex]);
 
   useEffect(() => {
     runRef.current += 1;
@@ -603,6 +608,7 @@ function VivaExamRoom({
     runRef.current += 1;
     stopListeningRef.current();
     stopTTS();
+    holdExamPrefetch();
     setExamPhase("evaluating");
 
     const parent = parentTurnRef.current;
@@ -624,8 +630,6 @@ function VivaExamRoom({
       stopAnswerClock();
       parentTurnRef.current = result.turnId;
       setEvaluations((prev) => ({ ...prev, [question.id]: result }));
-      if (answer) pushBubble("student", answer);
-      if (result.feedback) pushBubble("examiner", result.feedback);
 
       const action = resolveAction(result);
       if (action === "NEXT") {
@@ -639,13 +643,16 @@ function VivaExamRoom({
               ? "student.tests.recordedDone"
               : "student.tests.recordedMove";
         const bridge = tRef.current(bridgeKey);
-        pushBubble("examiner", bridge);
-        setExamPhase("speaking");
-        await speakLine(
+        const speaking = speakLine(
           [result.feedback, bridge].filter(Boolean).join(" "),
           voiceRef.current,
           enVoiceRef.current,
         );
+        if (answer) pushBubble("student", answer);
+        if (result.feedback) pushBubble("examiner", result.feedback);
+        pushBubble("examiner", bridge);
+        setExamPhase("speaking");
+        await speaking;
         if (!mountedRef.current) return;
         if (last) {
           // The exam only ends when the student submits it.
@@ -657,16 +664,20 @@ function VivaExamRoom({
 
       if (action === "FOLLOW_UP" && result.followUpQuestion) {
         followUpRef.current = result.followUpQuestion;
-        setFollowUpPrompt(result.followUpQuestion);
-        pushBubble("examiner", result.followUpQuestion);
         const spoken = [result.feedback, result.followUpQuestion].filter((part) => part && part.trim()).join(" ");
         speakThenListenRef.current(spoken, "listen");
+        setFollowUpPrompt(result.followUpQuestion);
+        if (answer) pushBubble("student", answer);
+        if (result.feedback) pushBubble("examiner", result.feedback);
+        pushBubble("examiner", result.followUpQuestion);
         return;
       }
 
       const choice = tRef.current("student.tests.choosePrompt");
-      pushBubble("examiner", choice);
       speakThenListenRef.current([result.feedback, choice].filter(Boolean).join(" "), "choose");
+      if (answer) pushBubble("student", answer);
+      if (result.feedback) pushBubble("examiner", result.feedback);
+      pushBubble("examiner", choice);
     } catch (err) {
       if (!mountedRef.current) return;
       if (err instanceof ApiError && err.status === 409 && /time is up for this question/i.test(err.message)) {
@@ -692,6 +703,7 @@ function VivaExamRoom({
       startListeningRef.current();
     } finally {
       submittingRef.current = false;
+      releaseExamPrefetch();
     }
   }, [pushBubble, questions, session.id, setExamPhase, stopAnswerClock]);
 
@@ -705,8 +717,8 @@ function VivaExamRoom({
     const question = questions[indexRef.current];
     if (!question) return;
     const prompt = followUpRef.current || question.prompt;
-    pushBubble("examiner", prompt);
     speakThenListen(prompt, "listen");
+    pushBubble("examiner", prompt);
   }, [pushBubble, questions, speakThenListen]);
 
   const skipQuestion = useCallback(() => {
