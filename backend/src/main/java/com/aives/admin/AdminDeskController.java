@@ -40,6 +40,14 @@ import jakarta.validation.constraints.Size;
 public class AdminDeskController {
 
     private static final Set<String> LANGUAGES = Set.of("vi", "en");
+    private static final Set<String> TTS_VOICES_VI = Set.of(
+            "maichi", "giahuy", "baotrang", "kimoanh", "hamy", "huuduc", "quangminh", "tiendat"
+    );
+    /** ZeroTTS Vietnamese latents (cross-lingual English) plus browser fallbacks. */
+    private static final Set<String> TTS_VOICES_EN = Set.of(
+            "maichi", "giahuy", "baotrang", "kimoanh", "hamy", "huuduc", "quangminh", "tiendat",
+            "google-en-us", "google-en-gb", "microsoft-en-us", "browser-en-us"
+    );
     private static final Set<String> EXAM_STATUSES = Set.of("DRAFT", "PUBLISHED", "SCHEDULED", "IN_PROGRESS", "COMPLETED", "CANCELLED");
 
     private final JdbcDeskRepository desk;

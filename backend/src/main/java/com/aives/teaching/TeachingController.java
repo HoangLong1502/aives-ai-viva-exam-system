@@ -147,29 +147,6 @@ public class TeachingController {
         );
     }
 
-    @DeleteMapping("/documents/{id}")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void deleteDocument(
-            @AuthenticationPrincipal PublicUser teacher,
-            @PathVariable String id
-    ) {
-        teaching.deleteDocument(teacher, id);
-    }
-
-    @PostMapping("/rubrics")
-    public RubricDetailItem createRubric(
-            @AuthenticationPrincipal PublicUser teacher,
-            @Valid @RequestBody CreateRubricRequest request
-    ) {
-        return teaching.createRubric(
-                teacher,
-                request.subjectId(),
-                request.name(),
-                request.description(),
-                request.criteria()
-        );
-    }
-
     @GetMapping("/questions")
     public List<QuestionItem> questions(
             @AuthenticationPrincipal PublicUser teacher,
