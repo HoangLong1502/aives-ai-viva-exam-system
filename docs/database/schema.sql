@@ -132,7 +132,7 @@ CREATE TABLE question (
   expected_answer text,
   source_ref text, -- compatibility: free-text citation of the source passage
   key_points text,
-  bloom_level varchar(20) NOT NULL, -- REMEMBER | UNDERSTAND | APPLY | ANALYZE
+  bloom_level varchar(20) NOT NULL, -- EASY | MEDIUM | HARD
   status varchar(20) NOT NULL DEFAULT 'PENDING_REVIEW', -- PENDING_REVIEW | APPROVED | REJECTED
   source varchar(20) NOT NULL, -- MANUAL | IMPORT | AI
   author_id uuid NOT NULL,

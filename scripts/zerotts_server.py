@@ -9,6 +9,9 @@ Run:
 import io
 import sys
 
+import numpy as np
+import soundfile as sf
+
 try:
     from fastapi import FastAPI, Query, HTTPException
     from fastapi.middleware.cors import CORSMiddleware
@@ -76,7 +79,8 @@ def speak(
     try:
         audio = model.synthesize(clean_text, voice=voice)
         buf = io.BytesIO()
-        model.save_audio(audio, buf)
+        # save_audio() infers the format from a file extension, which a BytesIO lacks.
+        sf.write(buf, np.asarray(audio).squeeze(), model.sample_rate, subtype="PCM_16", format="WAV")
         buf.seek(0)
         return Response(content=buf.read(), media_type="audio/wav")
     except Exception as e:

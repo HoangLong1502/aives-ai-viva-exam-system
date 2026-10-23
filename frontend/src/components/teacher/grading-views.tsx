@@ -142,8 +142,11 @@ function EmptyCard({ text }: { text: string }) {
   );
 }
 
-function PendingBadge({ count }: { count: number }) {
+function PendingBadge({ count, submitted }: { count: number; submitted: number }) {
   const { t } = useLocale();
+  if (submitted === 0) {
+    return <StatusBadge label={t("teacher.grading.noSubmissions")} variant="neutral" />;
+  }
   return count > 0 ? (
     <StatusBadge label={t("teacher.grading.pending", { count: String(count) })} variant="warning" />
   ) : (
@@ -163,6 +166,11 @@ function RowLink({ href, children }: { href: string; children: React.ReactNode }
       </Link>
     </li>
   );
+}
+
+function reviewLabel(t: (key: string, vars?: Record<string, string>) => string, count: number) {
+  if (count === 0) return t("teacher.grading.reviewDone");
+  return count === 1 ? t("teacher.grading.reviewCountOne") : t("teacher.grading.reviewCount", { count: String(count) });
 }
 
 function formatScore(value: number | null, digits = 1) {
@@ -202,7 +210,7 @@ export function GradingCoursesView() {
                       {t("teacher.grading.submittedCount", { count: String(course.submittedCount) })}
                     </p>
                   </div>
-                  <PendingBadge count={course.pendingCount} />
+                  <PendingBadge count={course.pendingCount} submitted={course.submittedCount} />
                 </RowLink>
               ))}
             </ul>
@@ -249,7 +257,7 @@ export function GradingExamsView({ courseId }: { courseId: string }) {
                       {t("teacher.grading.average", { score: formatScore(exam.averageScore) })}
                     </p>
                   </div>
-                  <PendingBadge count={exam.pendingCount} />
+                  <PendingBadge count={exam.pendingCount} submitted={exam.submittedCount} />
                 </RowLink>
               ))}
             </ul>
@@ -295,7 +303,8 @@ export function GradingParticipantsView({ courseId, examId }: { courseId: string
               <ul className="divide-y">
                 {data.participants.map((participant) => {
                   const submitted = participant.status === "SUBMITTED";
-                  const done = participant.answeredCount > 0 && participant.gradedCount >= participant.answeredCount;
+                  // A student who skipped every question has nothing to review.
+                  const done = participant.gradedCount >= participant.answeredCount;
                   return (
                     <RowLink
                       key={participant.attemptId}
@@ -309,6 +318,9 @@ export function GradingParticipantsView({ courseId, examId }: { courseId: string
                             graded: String(participant.gradedCount),
                             total: String(participant.answeredCount),
                           })}
+                          {submitted && !done
+                            ? ` · ${reviewLabel(t, Math.max(0, participant.answeredCount - participant.gradedCount))}`
+                            : ""}
                         </p>
                       </div>
                       <div className="flex items-center gap-3">
@@ -388,6 +400,14 @@ export function GradingAttemptView({
         <EmptyCard text={t("teacher.grading.noAnswers")} />
       ) : (
         <div className="space-y-4">
+          {data.questions.some((q) => q.answered) ? (
+            <div>
+              <StatusBadge
+                label={reviewLabel(t, data.questions.filter((q) => q.answered && q.teacherScore == null).length)}
+                variant={data.questions.some((q) => q.answered && q.teacherScore == null) ? "warning" : "success"}
+              />
+            </div>
+          ) : null}
           {data.questions.map((question) => (
             <QuestionCard
               key={question.questionId}

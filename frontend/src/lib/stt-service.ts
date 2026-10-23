@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useLocale } from "@/lib/i18n/locale-provider";
 
 export type UseSTTOptions = {
   lang?: "vi-VN" | "en-US";
@@ -53,6 +54,11 @@ function joinSpeech(...parts: string[]) {
 
 export function useSTT(options: UseSTTOptions = {}) {
   const { lang = "vi-VN", continuous = true, onFinalResult } = options;
+  const { t } = useLocale();
+  const tRef = useRef(t);
+  useEffect(() => {
+    tRef.current = t;
+  }, [t]);
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState("");
   const [isSupported] = useState(() => getSpeechRecognition() !== null);
@@ -124,7 +130,7 @@ export function useSTT(options: UseSTTOptions = {}) {
         if (event.error === "not-allowed" || event.error === "service-not-allowed") {
           wantListenRef.current = false;
           setIsListening(false);
-          setError("Microphone bị chặn. Vui lòng cho phép quyền truy cập Micro trên trình duyệt.");
+          setError(tRef.current("student.tests.micBlocked"));
           return;
         }
         if (event.error !== "no-speech" && event.error !== "aborted") {
@@ -153,7 +159,7 @@ export function useSTT(options: UseSTTOptions = {}) {
       console.error("Lỗi khi mở microphone:", err);
       wantListenRef.current = false;
       setIsListening(false);
-      setError("Không thể khởi động micro.");
+      setError(tRef.current("student.tests.micFailed"));
     }
   }, []);
 
@@ -164,7 +170,7 @@ export function useSTT(options: UseSTTOptions = {}) {
   const startListening = useCallback(() => {
     const SpeechRecognition = getSpeechRecognition();
     if (!SpeechRecognition) {
-      setError("Trình duyệt không hỗ trợ nhận diện giọng nói. Hãy dùng Google Chrome hoặc Microsoft Edge.");
+      setError(tRef.current("student.tests.sttUnsupported"));
       return;
     }
     if (restartTimerRef.current != null) {

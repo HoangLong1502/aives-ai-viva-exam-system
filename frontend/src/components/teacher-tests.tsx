@@ -31,6 +31,9 @@ type TeacherExam = {
   subjectId: string;
   subjectName: string;
   questionCount: number;
+  durationMinutes: number | null;
+  maxFollowUps: number;
+  answerTimeLimitSec: number;
 };
 type Question = {
   id: string;
@@ -45,7 +48,7 @@ type Question = {
   keyPoints: string | null;
 };
 
-const BLOOM = ["REMEMBER", "UNDERSTAND", "APPLY", "ANALYZE"] as const;
+const BLOOM = ["EASY", "MEDIUM", "HARD"] as const;
 
 export function TeacherTests() {
   const searchParams = useSearchParams();
@@ -60,8 +63,11 @@ export function TeacherTests() {
   const [title, setTitle] = useState("");
   const [format, setFormat] = useState("ORAL");
   const [topic, setTopic] = useState("Oral reasoning");
-  const [bloom, setBloom] = useState<(typeof BLOOM)[number]>("UNDERSTAND");
+  const [bloom, setBloom] = useState<(typeof BLOOM)[number]>("EASY");
   const [count, setCount] = useState(3);
+  const [durationMinutes, setDurationMinutes] = useState("30");
+  const [answerTimeLimitSec, setAnswerTimeLimitSec] = useState("120");
+  const [maxFollowUps, setMaxFollowUps] = useState("2");
   const [selected, setSelected] = useState<string[]>([]);
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [generating, setGenerating] = useState(false);
@@ -275,12 +281,35 @@ export function TeacherTests() {
       toast.error(t("teacher.tests.selectQuestion"));
       return;
     }
+    const minutes = Number(durationMinutes);
+    if (!Number.isInteger(minutes) || minutes < 1 || minutes > 600) {
+      toast.error(t("teacher.tests.durationInvalid"));
+      return;
+    }
+    const answerSeconds = Number(answerTimeLimitSec);
+    if (!Number.isInteger(answerSeconds) || (answerSeconds !== 0 && (answerSeconds < 15 || answerSeconds > 1800))) {
+      toast.error(t("teacher.tests.answerTimeInvalid"));
+      return;
+    }
+    const followUps = Number(maxFollowUps);
+    if (!Number.isInteger(followUps) || followUps < 0 || followUps > 5) {
+      toast.error(t("teacher.tests.maxFollowUpsInvalid"));
+      return;
+    }
     setStarting(true);
     try {
       await api("/api/teaching/exams", {
         method: "POST",
         auth: true,
-        body: { title, format, subjectId, questionIds: selected },
+        body: {
+          title,
+          format,
+          subjectId,
+          questionIds: selected,
+          durationMinutes: minutes,
+          answerTimeLimitSec: answerSeconds,
+          maxFollowUps: followUps,
+        },
       });
       setTitle("");
       setSelected([]);
@@ -597,6 +626,50 @@ export function TeacherTests() {
                 </select>
               </Field>
             </div>
+            <Field>
+              <FieldLabel htmlFor="session-duration">{t("teacher.tests.duration")}</FieldLabel>
+              <Input
+                id="session-duration"
+                type="number"
+                min={1}
+                max={600}
+                className="w-32"
+                value={durationMinutes}
+                onChange={(event) => setDurationMinutes(event.target.value)}
+                required
+              />
+              <p className="text-xs text-muted-foreground">{t("teacher.tests.durationHint")}</p>
+            </Field>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field>
+                <FieldLabel htmlFor="session-answer-time">{t("teacher.tests.answerTime")}</FieldLabel>
+                <Input
+                  id="session-answer-time"
+                  type="number"
+                  min={0}
+                  max={1800}
+                  className="w-32"
+                  value={answerTimeLimitSec}
+                  onChange={(event) => setAnswerTimeLimitSec(event.target.value)}
+                  required
+                />
+                <p className="text-xs text-muted-foreground">{t("teacher.tests.answerTimeHint")}</p>
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="session-follow-ups">{t("teacher.tests.maxFollowUps")}</FieldLabel>
+                <Input
+                  id="session-follow-ups"
+                  type="number"
+                  min={0}
+                  max={5}
+                  className="w-32"
+                  value={maxFollowUps}
+                  onChange={(event) => setMaxFollowUps(event.target.value)}
+                  required
+                />
+                <p className="text-xs text-muted-foreground">{t("teacher.tests.maxFollowUpsHint")}</p>
+              </Field>
+            </div>
             <ul className="space-y-2">
               {approved.length === 0 ? (
                 <li className="text-sm text-muted-foreground">{t("teacher.tests.noApproved")}</li>
@@ -660,6 +733,19 @@ export function TeacherTests() {
                     </span>
                     <span className="text-muted-foreground">
                       {t("teacher.tests.questionsCount", { count: String(exam.questionCount) })}
+                    </span>
+                    {exam.durationMinutes ? (
+                      <span className="text-muted-foreground">
+                        {t("teacher.tests.durationMinutes", { count: String(exam.durationMinutes) })}
+                      </span>
+                    ) : null}
+                    {exam.answerTimeLimitSec > 0 ? (
+                      <span className="text-muted-foreground">
+                        {t("teacher.tests.answerTimeSeconds", { count: String(exam.answerTimeLimitSec) })}
+                      </span>
+                    ) : null}
+                    <span className="text-muted-foreground">
+                      {t("teacher.tests.followUpsCount", { count: String(exam.maxFollowUps) })}
                     </span>
                   </div>
                   <div className="flex flex-col gap-2 sm:flex-row">

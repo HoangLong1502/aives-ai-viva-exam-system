@@ -39,7 +39,7 @@ type Question = {
   keyPoints?: string | null;
 };
 
-const BLOOM = ["REMEMBER", "UNDERSTAND", "APPLY", "ANALYZE"] as const;
+const BLOOM = ["EASY", "MEDIUM", "HARD"] as const;
 
 export function TeacherBank() {
   const { t, locale } = useLocale();
@@ -50,7 +50,7 @@ export function TeacherBank() {
   const [subjectId, setSubjectId] = useState("");
   const [rubricId, setRubricId] = useState("");
   const [topic, setTopic] = useState("Oral reasoning");
-  const [bloom, setBloom] = useState<(typeof BLOOM)[number]>("UNDERSTAND");
+  const [bloom, setBloom] = useState<(typeof BLOOM)[number]>("EASY");
   const [prompt, setPrompt] = useState("");
   const [importText, setImportText] = useState("");
 

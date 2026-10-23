@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import { CalendarClockIcon } from "lucide-react";
+import { CalendarClockIcon, XIcon } from "lucide-react";
 import { toast } from "sonner";
 import { ErrorState, LoadingSkeleton, PageHeader } from "@/components/admin/ui/dashboard-ui";
 import { SelectControl } from "@/components/admin/ui/controls";
@@ -25,6 +25,7 @@ import { cn } from "cn";
 
 type Subject = { id: string; code: string; name: string; teacherIds: string[] };
 type Tab = "schedule" | "config";
+type Speech = { sttLanguage: string; ttsLanguage: string; ttsVoice: string; ttsVoiceEn: string };
 
 export function AdminSettings() {
   const { t, messages } = useLocale();
@@ -102,6 +103,21 @@ export function AdminSettings() {
       setReloadKey((current) => current + 1);
     } catch (reason) {
       toast.error(reason instanceof ApiError ? reason.message : copy.assignError);
+    } finally {
+      setAssigningId(null);
+    }
+  }
+
+  async function unassign(subject: Subject, teacherId: string) {
+    const name = teacherName(teacherId) ?? copy.unknownTeacher;
+    if (!window.confirm(t("admin.settings.unassignConfirm", { teacher: name, subject: subject.code }))) return;
+    setAssigningId(subject.id);
+    try {
+      await api(`/api/admin/subjects/${subject.id}/teachers/${teacherId}`, { method: "DELETE", auth: true });
+      toast.success(copy.unassigned);
+      setReloadKey((current) => current + 1);
+    } catch (reason) {
+      toast.error(reason instanceof ApiError ? reason.message : copy.unassignError);
     } finally {
       setAssigningId(null);
     }
@@ -237,9 +253,20 @@ export function AdminSettings() {
                               {subject.teacherIds.map((id) => (
                                 <li
                                   key={id}
-                                  className="rounded-md bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground"
+                                  className="inline-flex items-center gap-1 rounded-full bg-muted py-0.5 pr-1 pl-2.5 text-xs font-medium text-muted-foreground ring-1 ring-foreground/10 ring-inset"
                                 >
                                   {teacherName(id) ?? copy.unknownTeacher}
+                                  <button
+                                    type="button"
+                                    className="inline-flex size-4 items-center justify-center rounded-full hover:bg-foreground/10 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none disabled:opacity-50"
+                                    aria-label={t("admin.settings.unassignTeacher", {
+                                      teacher: teacherName(id) ?? copy.unknownTeacher,
+                                    })}
+                                    disabled={assigningId === subject.id}
+                                    onClick={() => void unassign(subject, id)}
+                                  >
+                                    <XIcon className="size-3" aria-hidden />
+                                  </button>
                                 </li>
                               ))}
                             </ul>
@@ -268,6 +295,7 @@ export function AdminSettings() {
           </Card>
         </>
       )}
+      {tab === "config" ? <SpeechSettings /> : null}
       </div>
     </div>
   );
@@ -475,7 +503,7 @@ function ExamSchedule() {
           ) : (
             <ul className="grid gap-3 sm:grid-cols-3">
               {examStatusCounts(stats).map((row) => (
-                <li key={row.status} className="rounded-xl bg-card p-4 ring-1 ring-foreground/10">
+                <li key={row.status} className="rounded-2xl bg-card p-5 shadow-soft ring-1 ring-foreground/[0.07]">
                   <span className="flex items-center gap-2 text-sm text-muted-foreground">
                     <span
                       className={cn("size-2 rounded-full", examStatusPresentation(row.status).barClass)}
@@ -515,6 +543,141 @@ function ExamSchedule() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+const DEFAULT_SPEECH: Speech = { sttLanguage: "vi", ttsLanguage: "vi", ttsVoice: "maichi", ttsVoiceEn: "maichi" };
+
+function SpeechSettings() {
+  const { messages } = useLocale();
+  const copy = messages.admin.settings;
+  const [speech, setSpeech] = useState<Speech | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    api<Speech>("/api/admin/speech", { auth: true, signal: controller.signal, cache: "no-store" })
+      .then((value) => {
+        if (controller.signal.aborted) return;
+        setSpeech({
+          sttLanguage: value.sttLanguage || DEFAULT_SPEECH.sttLanguage,
+          ttsLanguage: value.ttsLanguage || DEFAULT_SPEECH.ttsLanguage,
+          ttsVoice: value.ttsVoice || DEFAULT_SPEECH.ttsVoice,
+          ttsVoiceEn: value.ttsVoiceEn || DEFAULT_SPEECH.ttsVoiceEn,
+        });
+        setError(null);
+      })
+      .catch((reason) => {
+        if (controller.signal.aborted) return;
+        setError(reason instanceof ApiError ? reason.message : copy.loadError);
+      });
+    return () => controller.abort();
+  }, [reloadKey, copy.loadError]);
+
+  function update(field: keyof Speech, value: string) {
+    setSpeech((current) => (current ? { ...current, [field]: value } : current));
+  }
+
+  async function save(event: FormEvent) {
+    event.preventDefault();
+    if (!speech) return;
+    setSaving(true);
+    try {
+      const saved = await api<Speech>("/api/admin/speech", { method: "PATCH", auth: true, body: speech });
+      setSpeech(saved);
+      toast.success(copy.saved);
+    } catch (reason) {
+      toast.error(reason instanceof ApiError ? reason.message : copy.saveError);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Card className="min-w-0">
+      <CardHeader className="border-b">
+        <CardTitle className="font-serif text-2xl">{copy.speechTitle}</CardTitle>
+        <CardDescription>{copy.speechDescription}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {error && speech === null ? (
+          <ErrorState
+            title={copy.loadError}
+            message={error}
+            retryLabel={copy.retry}
+            onRetry={() => setReloadKey((current) => current + 1)}
+          />
+        ) : speech === null ? (
+          <LoadingSkeleton className="h-40 w-full" label={copy.loading} />
+        ) : (
+          <form className="grid gap-4 sm:grid-cols-2" onSubmit={save}>
+            <div className="grid gap-1.5">
+              <Label htmlFor="speech-stt">{copy.stt}</Label>
+              <SelectControl
+                id="speech-stt"
+                value={speech.sttLanguage}
+                onChange={(event) => update("sttLanguage", event.target.value)}
+              >
+                <option value="vi">{copy.vietnamese}</option>
+                <option value="en">{copy.english}</option>
+              </SelectControl>
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="speech-tts">{copy.tts}</Label>
+              <SelectControl
+                id="speech-tts"
+                value={speech.ttsLanguage}
+                onChange={(event) => update("ttsLanguage", event.target.value)}
+              >
+                <option value="vi">{copy.vietnamese}</option>
+                <option value="en">{copy.english}</option>
+              </SelectControl>
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="speech-voice-vi">{copy.ttsVoice}</Label>
+              <SelectControl
+                id="speech-voice-vi"
+                value={speech.ttsVoice}
+                aria-describedby="speech-voice-vi-hint"
+                onChange={(event) => update("ttsVoice", event.target.value)}
+              >
+                {ZEROTTS_VOICES.map((voice) => (
+                  <option key={voice.id} value={voice.id}>
+                    {voice.label}
+                  </option>
+                ))}
+              </SelectControl>
+              <p id="speech-voice-vi-hint" className="text-xs text-muted-foreground">
+                {copy.ttsVoiceHint}
+              </p>
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="speech-voice-en">{copy.ttsVoiceEn}</Label>
+              <SelectControl
+                id="speech-voice-en"
+                value={speech.ttsVoiceEn}
+                aria-describedby="speech-voice-en-hint"
+                onChange={(event) => update("ttsVoiceEn", event.target.value)}
+              >
+                {ENGLISH_VOICES.map((voice) => (
+                  <option key={voice.id} value={voice.id}>
+                    {voice.label}
+                  </option>
+                ))}
+              </SelectControl>
+              <p id="speech-voice-en-hint" className="text-xs text-muted-foreground">
+                {copy.ttsVoiceEnHint}
+              </p>
+            </div>
+            <Button type="submit" className="sm:col-span-2 sm:w-fit" disabled={saving}>
+              {saving ? copy.saving : copy.save}
+            </Button>
+          </form>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

@@ -66,7 +66,7 @@ const VIETNAMESE_CHARS =
 
 const ENGLISH_VOICE_IDS = new Set(ENGLISH_VOICES.map((voice) => voice.id));
 const ZERO_VOICE_IDS = new Set(ZEROTTS_VOICES.map((voice) => voice.id));
-const BROWSER_ENGLISH_VOICE_IDS = new Set(
+const BROWSER_ENGLISH_VOICE_IDS = new Set<string>(
   ENGLISH_VOICES.filter((voice) => voice.engine === "browser").map((voice) => voice.id),
 );
 

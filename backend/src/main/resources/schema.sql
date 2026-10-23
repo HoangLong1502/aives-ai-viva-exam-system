@@ -201,6 +201,7 @@ CREATE TABLE answer (
   duration_ms int,
   needs_follow_up boolean NOT NULL DEFAULT false,
   follow_up_reason varchar(20),
+  follow_up_question text,
   stt_latency_ms int,
   llm_latency_ms int,
   score numeric(5,2),
@@ -261,7 +262,7 @@ CREATE UNIQUE INDEX uq_course_document_content
     WHERE content_hash IS NOT NULL AND extraction_status <> 'FAILED';
 CREATE INDEX idx_course_document_status ON course_document (extraction_status);
 
-ALTER TABLE question ADD CONSTRAINT ck_q_bloom CHECK (bloom_level IN ('REMEMBER','UNDERSTAND','APPLY','ANALYZE'));
+ALTER TABLE question ADD CONSTRAINT ck_q_bloom CHECK (bloom_level IN ('EASY','MEDIUM','HARD'));
 ALTER TABLE question ADD CONSTRAINT ck_q_status CHECK (status IN ('PENDING_REVIEW','APPROVED','REJECTED'));
 ALTER TABLE question ADD CONSTRAINT ck_q_source CHECK (source IN ('MANUAL','IMPORT','AI'));
 ALTER TABLE exam_session ADD CONSTRAINT ck_es_format CHECK (format IN ('MULTIPLE_CHOICE','ORAL'));

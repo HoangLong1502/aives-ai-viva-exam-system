@@ -19,6 +19,7 @@ app:
   jwt-ttl: 7d
   frontend-url: ${FRONTEND_URL:http://localhost:3001}
   google-client-id: ${GOOGLE_CLIENT_ID:}
+  # Relative paths depend on the working directory; set DOCUMENTS_DIR to an absolute, persistent path when deploying.
   documents-dir: ${DOCUMENTS_DIR:data/documents}
   documents-max-size: ${DOCUMENTS_MAX_SIZE:25MB}
   ai:

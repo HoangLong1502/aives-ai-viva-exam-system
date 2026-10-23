@@ -48,9 +48,12 @@ export function TeacherPageHeader({
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-2">
           {eyebrow ? (
-            <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">{eyebrow}</p>
+            <p className="flex items-center gap-2 text-xs font-medium uppercase tracking-[0.22em] text-muted-foreground">
+              <span className="h-px w-6 bg-highlight" aria-hidden />
+              {eyebrow}
+            </p>
           ) : null}
-          <h1 className="font-serif text-3xl tracking-tight sm:text-4xl">{title}</h1>
+          <h1 className="font-serif text-3xl tracking-tight text-balance sm:text-[2.6rem] sm:leading-[1.1]">{title}</h1>
           {description ? (
             <p className="max-w-2xl text-sm leading-6 text-muted-foreground">{description}</p>
           ) : null}
