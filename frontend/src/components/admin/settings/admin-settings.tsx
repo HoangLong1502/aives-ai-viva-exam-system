@@ -168,6 +168,7 @@ export function AdminSettings() {
       </div>
 
       <div id="settings-config" role="tabpanel" hidden={tab !== "config"} className="space-y-8">
+      {tab === "config" ? <SpeechSettings /> : null}
       {error && subjects === null ? (
         <ErrorState
           title={copy.loadError}
@@ -297,6 +298,161 @@ export function AdminSettings() {
       {tab === "config" ? <SpeechSettings /> : null}
       </div>
     </div>
+  );
+}
+
+type Speech = {
+  sttLanguage: string;
+  ttsLanguage: string;
+  ttsVoice: string;
+  ttsVoiceEn: string;
+};
+
+const ZERO_ENGLISH_VOICES = ENGLISH_VOICES.filter((voice) => voice.engine === "zerotts");
+const BROWSER_ENGLISH_VOICES = ENGLISH_VOICES.filter((voice) => voice.engine === "browser");
+
+function knownVoice(id: string | undefined, voices: readonly { id: string }[], fallback: string) {
+  return id && voices.some((voice) => voice.id === id) ? id : fallback;
+}
+
+function SpeechSettings() {
+  const { messages } = useLocale();
+  const copy = messages.admin.settings;
+  const [speech, setSpeech] = useState<Speech | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    api<Speech>("/api/admin/speech", { auth: true, signal: controller.signal, cache: "no-store" })
+      .then((next) => {
+        if (controller.signal.aborted) return;
+        setSpeech({
+          sttLanguage: next.sttLanguage === "en" ? "en" : "vi",
+          ttsLanguage: next.ttsLanguage === "en" ? "en" : "vi",
+          ttsVoice: knownVoice(next.ttsVoice, ZEROTTS_VOICES, "maichi"),
+          ttsVoiceEn: knownVoice(next.ttsVoiceEn, ENGLISH_VOICES, "maichi"),
+        });
+        setError(null);
+      })
+      .catch((reason) => {
+        if (controller.signal.aborted) return;
+        setError(reason instanceof ApiError ? reason.message : copy.loadError);
+      });
+    return () => controller.abort();
+  }, [reloadKey, copy.loadError]);
+
+  async function saveSpeech(event: FormEvent) {
+    event.preventDefault();
+    if (!speech) return;
+    setSaving(true);
+    try {
+      const saved = await api<Speech>("/api/admin/speech", {
+        method: "PATCH",
+        auth: true,
+        body: speech,
+      });
+      setSpeech({
+        sttLanguage: saved.sttLanguage === "en" ? "en" : "vi",
+        ttsLanguage: saved.ttsLanguage === "en" ? "en" : "vi",
+        ttsVoice: knownVoice(saved.ttsVoice, ZEROTTS_VOICES, "maichi"),
+        ttsVoiceEn: knownVoice(saved.ttsVoiceEn, ENGLISH_VOICES, "maichi"),
+      });
+      toast.success(copy.saved);
+    } catch (reason) {
+      toast.error(reason instanceof ApiError ? reason.message : copy.saveError);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Card className="min-w-0">
+      <CardHeader className="border-b">
+        <CardTitle className="font-serif text-2xl">{copy.speechTitle}</CardTitle>
+        <CardDescription>{copy.speechDescription}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {error && speech === null ? (
+          <ErrorState
+            title={copy.loadError}
+            message={error}
+            retryLabel={copy.retry}
+            onRetry={() => setReloadKey((current) => current + 1)}
+          />
+        ) : speech === null ? (
+          <LoadingSkeleton className="h-40 w-full" label={copy.loading} />
+        ) : (
+          <form className="grid gap-4 sm:grid-cols-2" onSubmit={(event) => void saveSpeech(event)}>
+            <div className="grid gap-1.5">
+              <Label htmlFor="speech-stt">{copy.stt}</Label>
+              <SelectControl
+                id="speech-stt"
+                value={speech.sttLanguage}
+                onChange={(event) => setSpeech((current) => current && { ...current, sttLanguage: event.target.value })}
+              >
+                <option value="vi">{copy.vietnamese}</option>
+                <option value="en">{copy.english}</option>
+              </SelectControl>
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="speech-tts">{copy.tts}</Label>
+              <SelectControl
+                id="speech-tts"
+                value={speech.ttsLanguage}
+                onChange={(event) => setSpeech((current) => current && { ...current, ttsLanguage: event.target.value })}
+              >
+                <option value="vi">{copy.vietnamese}</option>
+                <option value="en">{copy.english}</option>
+              </SelectControl>
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="speech-voice-vi">{copy.ttsVoice}</Label>
+              <SelectControl
+                id="speech-voice-vi"
+                value={speech.ttsVoice}
+                onChange={(event) => setSpeech((current) => current && { ...current, ttsVoice: event.target.value })}
+              >
+                {ZEROTTS_VOICES.map((voice) => (
+                  <option key={voice.id} value={voice.id}>
+                    {voice.label}
+                  </option>
+                ))}
+              </SelectControl>
+              <p className="text-sm text-muted-foreground">{copy.ttsVoiceHint}</p>
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="speech-voice-en">{copy.ttsVoiceEn}</Label>
+              <SelectControl
+                id="speech-voice-en"
+                value={speech.ttsVoiceEn}
+                onChange={(event) => setSpeech((current) => current && { ...current, ttsVoiceEn: event.target.value })}
+              >
+                <optgroup label={copy.ttsVoiceEnZero}>
+                  {ZERO_ENGLISH_VOICES.map((voice) => (
+                    <option key={voice.id} value={voice.id}>
+                      {voice.label}
+                    </option>
+                  ))}
+                </optgroup>
+                <optgroup label={copy.ttsVoiceEnBrowser}>
+                  {BROWSER_ENGLISH_VOICES.map((voice) => (
+                    <option key={voice.id} value={voice.id}>
+                      {voice.label}
+                    </option>
+                  ))}
+                </optgroup>
+              </SelectControl>
+              <p className="text-sm text-muted-foreground">{copy.ttsVoiceEnHint}</p>
+            </div>
+            <Button type="submit" className="sm:col-span-2 sm:w-fit" disabled={saving}>
+              {saving ? copy.saving : copy.save}
+            </Button>
+          </form>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
