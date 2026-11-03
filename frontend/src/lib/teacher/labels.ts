@@ -3,17 +3,15 @@ import type { Messages } from "@/lib/i18n/messages/en";
 type TeacherLabels = Messages["teacher"]["labels"];
 
 const BLOOM_VI: Record<string, string> = {
-  REMEMBER: "Nhớ",
-  UNDERSTAND: "Hiểu",
-  APPLY: "Vận dụng",
-  ANALYZE: "Phân tích",
+  EASY: "Dễ",
+  MEDIUM: "Trung bình",
+  HARD: "Khó",
 };
 
 const BLOOM_EN: Record<string, string> = {
-  REMEMBER: "Remember",
-  UNDERSTAND: "Understand",
-  APPLY: "Apply",
-  ANALYZE: "Analyze",
+  EASY: "Easy",
+  MEDIUM: "Medium",
+  HARD: "Hard",
 };
 
 export function formatBloom(bloom: string, locale: "vi" | "en") {

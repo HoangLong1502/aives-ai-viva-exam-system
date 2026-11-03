@@ -7,6 +7,8 @@ import { api, ApiError } from "@/lib/api";
 import { clearSession } from "@/lib/auth";
 import type { MeResponse, User } from "@/lib/types";
 
+export const USER_UPDATED_EVENT = "aives:user-updated";
+
 export function useCurrentUser() {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
@@ -29,8 +31,14 @@ export function useCurrentUser() {
         toast.error("Could not load your session.");
       });
 
+    const onUpdated = (event: Event) => {
+      setUser((event as CustomEvent<User>).detail);
+    };
+    window.addEventListener(USER_UPDATED_EVENT, onUpdated);
+
     return () => {
       cancelled = true;
+      window.removeEventListener(USER_UPDATED_EVENT, onUpdated);
     };
   }, [router]);
 

@@ -1,12 +1,20 @@
 "use client";
 
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Loader2Icon, LogOutIcon, UserIcon } from "lucide-react";
+import {
+  Loader2Icon,
+  LogOutIcon,
+  PanelLeftCloseIcon,
+  PanelLeftIcon,
+  UserIcon,
+  type LucideIcon,
+} from "lucide-react";
 import { toast } from "sonner";
 import { BrandMark } from "@/components/brand-mark";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,7 +29,15 @@ import { useLocale, useRoleLabel } from "@/lib/i18n/locale-provider";
 import { homeForRole } from "@/lib/role-home";
 import { useCurrentUser } from "@/lib/use-current-user";
 import type { Role } from "@/lib/types";
-import { cn } from "@/lib/utils"; // Chú ý: đảm bảo đường dẫn import cn chính xác
+import {
+  shellAccountTriggerClass,
+  shellAsideClass,
+  shellBrandEyebrowClass,
+  shellHeaderClass,
+  shellMainClass,
+  shellNavItemClass,
+} from "@/components/shell-styles";
+import { cn } from "cn";
 
 export function PortalShell({
   role,
@@ -31,7 +47,7 @@ export function PortalShell({
 }: {
   role: Role;
   eyebrow: string;
-  nav: { href: string; label: string; exact?: boolean }[];
+  nav: { href: string; label: string; exact?: boolean; icon?: LucideIcon }[];
   children: ReactNode;
 }) {
   const router = useRouter();
@@ -39,9 +55,17 @@ export function PortalShell({
   const { user, signOut } = useCurrentUser();
   const { t } = useLocale();
   const roleLabel = useRoleLabel(user?.role ?? role);
-
   // Đường dẫn đến trang Profile tương ứng với Role (VD: /student/profile)
   const profileHref = `/${(user?.role ?? role).toLowerCase()}/profile`;
+  const [collapsed, setCollapsed] = useState(false);
+  const isActive = (item: { href: string; exact?: boolean }) =>
+    item.exact
+      ? pathname === item.href
+      : pathname === item.href || pathname.startsWith(`${item.href}/`);
+  const profileLabel = t("nav.student.profile") || t("student_profile.edit") || "My Profile";
+  const pageTitle =
+    pathname === profileHref ? profileLabel : (nav.find(isActive) ?? nav[0])?.label ?? "";
+
 
   useEffect(() => {
     if (user && user.role !== role) {
@@ -60,20 +84,25 @@ export function PortalShell({
 
   return (
     <div className="flex min-h-svh flex-col bg-background">
-      <header className="flex h-16 items-center justify-between border-b bg-card/80 px-4 backdrop-blur sm:px-6">
-        <Link href={homeForRole(role)} className="flex items-center gap-3">
-          <BrandMark className="size-8 text-base" />
-          <div className="leading-tight">
-            <p className="font-serif text-lg">AIVES</p>
-            <p className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
-              {eyebrow}
-            </p>
-          </div>
-        </Link>
+      <header className={shellHeaderClass}>
+        <div className="flex min-w-0 items-center gap-3">
+          <Link href={homeForRole(role)} className="flex shrink-0 items-center gap-3">
+            <BrandMark className="size-8 text-base" />
+            <div className="leading-tight">
+              <p className="font-serif text-lg">AIVES</p>
+              <p className={shellBrandEyebrowClass}>
+                {eyebrow}
+              </p>
+            </div>
+          </Link>
+          <span className="hidden h-6 w-px bg-border md:block" aria-hidden />
+          <p className="hidden truncate font-medium md:block">{pageTitle}</p>
+        </div>
         <div className="flex items-center gap-2 sm:gap-3">
           <LanguageSwitch />
+          <span className="hidden text-sm text-muted-foreground lg:block">{roleLabel}</span>
           <DropdownMenu>
-            <DropdownMenuTrigger className="inline-flex h-10 items-center gap-2 rounded-lg px-2 text-sm hover:bg-muted">
+            <DropdownMenuTrigger className={shellAccountTriggerClass}>
               <Avatar size="sm">
                 <AvatarFallback>
                   {user.name.slice(0, 1).toUpperCase()}
@@ -85,8 +114,8 @@ export function PortalShell({
               <DropdownMenuGroup>
                 <DropdownMenuLabel className="font-normal">
                   <p className="font-medium">{user.name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {roleLabel}
+                  <p className="text-xs font-normal text-muted-foreground">
+                    {user.email}
                   </p>
                 </DropdownMenuLabel>
               </DropdownMenuGroup>
@@ -95,7 +124,7 @@ export function PortalShell({
                 <DropdownMenuItem>
                   <Link href={profileHref} className="cursor-pointer">
                     <UserIcon className="mr-2 size-4" />
-                    {t("nav.student.profile") || t("student_profile.edit") || "My Profile"}
+                    {profileLabel}
                   </Link>
                 </DropdownMenuItem>
               </DropdownMenuGroup>
@@ -109,44 +138,71 @@ export function PortalShell({
         </div>
       </header>
       <div className="flex min-h-0 flex-1">
-        <aside className="hidden w-56 shrink-0 border-r bg-card/40 md:block">
-          <nav className="flex flex-col gap-1 p-3">
-            {nav.map((item) => {
-              const active = item.exact
-                ? pathname === item.href
-                : pathname === item.href || pathname.startsWith(`${item.href}/`);
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={cn(
-                    "rounded-lg px-3 py-2 text-sm",
-                    active
-                      ? "bg-muted font-medium text-foreground"
-                      : "text-muted-foreground hover:bg-muted/70 hover:text-foreground",
-                  )}
-                >
-                  {item.label}
-                </Link>
-              );
-            })}
-          </nav>
+        <aside
+          className={shellAsideClass(collapsed)}
+        >
+          <div className={cn("flex p-2", collapsed ? "justify-center" : "justify-end")}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => setCollapsed((value) => !value)}
+              aria-expanded={!collapsed}
+              aria-label={collapsed ? t("admin.shell.expandNav") : t("admin.shell.collapseNav")}
+            >
+              {collapsed ? <PanelLeftIcon /> : <PanelLeftCloseIcon />}
+            </Button>
+          </div>
+          <PortalNav items={nav} isActive={isActive} collapsed={collapsed} label={eyebrow} />
         </aside>
-        <div className="mx-auto w-full max-w-5xl flex-1 px-4 py-8 sm:px-8">
-          <nav className="mb-6 flex gap-2 overflow-x-auto md:hidden">
-            {nav.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className="rounded-lg bg-muted px-3 py-2 text-sm"
-              >
-                {item.label}
-              </Link>
-            ))}
-          </nav>
-          {children}
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="border-b md:hidden">
+            <PortalNav items={nav} isActive={isActive} compact label={eyebrow} />
+          </div>
+          <main className={shellMainClass}>
+            <p className="mb-4 font-medium md:hidden">{pageTitle}</p>
+            {children}
+          </main>
         </div>
       </div>
     </div>
+  );
+}
+
+function PortalNav({
+  items,
+  isActive,
+  collapsed = false,
+  compact = false,
+  label,
+}: {
+  items: { href: string; label: string; exact?: boolean; icon?: LucideIcon }[];
+  isActive: (item: { href: string; exact?: boolean }) => boolean;
+  collapsed?: boolean;
+  compact?: boolean;
+  label: string;
+}) {
+  return (
+    <nav
+      aria-label={label}
+      className={cn("flex gap-1 p-3", compact ? "flex-row overflow-x-auto pt-3" : "flex-col pt-0")}
+    >
+      {items.map((item) => {
+        const active = isActive(item);
+        const Icon = item.icon;
+        return (
+          <Link
+            key={item.href}
+            href={item.href}
+            aria-current={active ? "page" : undefined}
+            title={collapsed ? item.label : undefined}
+            className={shellNavItemClass({ active, collapsed, compact })}
+          >
+            {Icon ? <Icon className="size-4 shrink-0" aria-hidden /> : null}
+            {collapsed ? <span className="sr-only">{item.label}</span> : item.label}
+          </Link>
+        );
+      })}
+    </nav>
   );
 }

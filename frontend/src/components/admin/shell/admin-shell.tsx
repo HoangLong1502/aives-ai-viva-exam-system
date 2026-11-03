@@ -37,6 +37,14 @@ import { LanguageSwitch } from "@/components/language-switch";
 import { useLocale, useRoleLabel } from "@/lib/i18n/locale-provider";
 import { useCurrentUser } from "@/lib/use-current-user";
 import type { User } from "@/lib/types";
+import {
+  shellAccountTriggerClass,
+  shellAsideClass,
+  shellBrandEyebrowClass,
+  shellHeaderClass,
+  shellMainClass,
+  shellNavItemClass,
+} from "@/components/shell-styles";
 import { cn } from "cn";
 
 const NAV_ICONS = [
@@ -104,13 +112,13 @@ export function AdminShell({ children }: { children: ReactNode }) {
   return (
     <AdminSessionContext.Provider value={{ user, setUser, signOut }}>
       <div className="flex min-h-svh flex-col bg-background">
-        <header className="flex h-16 items-center justify-between border-b bg-card/80 px-4 backdrop-blur sm:px-6">
+        <header className={shellHeaderClass}>
           <div className="flex min-w-0 items-center gap-3">
             <Link href="/admin" className="flex shrink-0 items-center gap-3">
               <BrandMark className="size-8 text-base" />
               <div className="leading-tight">
                 <p className="font-serif text-lg">AIVES</p>
-                <p className="hidden text-[10px] uppercase tracking-[0.22em] text-muted-foreground sm:block">
+                <p className={shellBrandEyebrowClass}>
                   {t("brand.adminEyebrow")}
                 </p>
               </div>
@@ -122,7 +130,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
             <LanguageSwitch />
             <span className="hidden text-sm text-muted-foreground lg:block">{roleLabel}</span>
             <DropdownMenu>
-              <DropdownMenuTrigger className="inline-flex h-10 max-w-48 items-center rounded-lg px-2.5 text-sm hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none">
+              <DropdownMenuTrigger className={cn(shellAccountTriggerClass, "max-w-56 px-3")}>
                 <span className="truncate">{user.name}</span>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="min-w-56">
@@ -144,10 +152,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
 
         <div className="flex min-h-0 flex-1">
           <aside
-            className={cn(
-              "hidden shrink-0 border-r bg-card/40 motion-safe:transition-[width] motion-safe:duration-200 md:flex md:flex-col",
-              collapsed ? "w-[4.25rem]" : "w-60",
-            )}
+            className={shellAsideClass(collapsed)}
           >
             <div className={cn("flex p-2", collapsed ? "justify-center" : "justify-end")}>
               <Button
@@ -167,7 +172,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
             <div className="border-b md:hidden">
               <AdminNav pathname={pathname} items={nav} compact label={t("admin.shell.navLabel")} />
             </div>
-            <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-8 sm:py-8">
+            <main className={shellMainClass}>
               <p className="mb-4 font-medium md:hidden">{pageTitle}</p>
               {children}
             </main>
@@ -205,14 +210,7 @@ function AdminNav({
             href={item.href}
             aria-current={active ? "page" : undefined}
             title={collapsed ? item.label : undefined}
-            className={cn(
-              "flex items-center rounded-lg text-sm whitespace-nowrap focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none",
-              collapsed ? "justify-center px-2 py-2.5" : "gap-2 px-3 py-2",
-              active
-                ? "bg-primary/10 font-medium text-foreground shadow-[inset_3px_0_0_0_var(--primary)]"
-                : "text-muted-foreground hover:bg-muted/70 hover:text-foreground",
-              compact && active && "shadow-none",
-            )}
+            className={shellNavItemClass({ active, collapsed, compact })}
           >
             <Icon className="size-4 shrink-0" aria-hidden />
             {collapsed ? <span className="sr-only">{item.label}</span> : item.label}

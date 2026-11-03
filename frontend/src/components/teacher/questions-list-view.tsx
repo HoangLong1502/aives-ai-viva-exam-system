@@ -43,7 +43,7 @@ type QuestionDraft = {
   keyPoints: string;
 };
 
-const BLOOM = ["REMEMBER", "UNDERSTAND", "APPLY", "ANALYZE"] as const;
+const BLOOM = ["EASY", "MEDIUM", "HARD"] as const;
 
 export function TeacherQuestionsListView() {
   const { t, locale, messages } = useLocale();

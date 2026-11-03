@@ -16,6 +16,7 @@ ALTER TABLE answer ADD COLUMN IF NOT EXISTS evaluator varchar(20);
 ALTER TABLE answer DROP CONSTRAINT IF EXISTS ck_answer_score;
 ALTER TABLE answer ADD CONSTRAINT ck_answer_score CHECK (score IS NULL OR (score >= 0 AND score <= 100));
 
+ALTER TABLE answer ADD COLUMN IF NOT EXISTS follow_up_question text;
 ALTER TABLE answer ADD COLUMN IF NOT EXISTS teacher_score numeric(5,2);
 ALTER TABLE answer ADD COLUMN IF NOT EXISTS teacher_feedback text;
 ALTER TABLE answer ADD COLUMN IF NOT EXISTS graded_by uuid;
@@ -26,8 +27,10 @@ ALTER TABLE answer ADD CONSTRAINT ck_answer_teacher_score CHECK (teacher_score I
 ALTER TABLE course_document ADD COLUMN IF NOT EXISTS content_hash varchar(64);
 ALTER TABLE course_document ADD COLUMN IF NOT EXISTS page_count int;
 ALTER TABLE course_document ADD COLUMN IF NOT EXISTS processed_at timestamptz;
-CREATE UNIQUE INDEX IF NOT EXISTS uq_course_document_content
-    ON course_document (course_id, uploaded_by, content_hash)
+-- Materials belong to the subject. Drop the older per-teacher index; CREATE IF NOT EXISTS would keep it.
+DROP INDEX IF EXISTS uq_course_document_content;
+CREATE UNIQUE INDEX uq_course_document_content
+    ON course_document (course_id, content_hash)
     WHERE content_hash IS NOT NULL AND extraction_status <> 'FAILED';
 CREATE INDEX IF NOT EXISTS idx_course_document_status ON course_document (extraction_status);
 
@@ -42,3 +45,15 @@ WHERE tts_voice_en IS NULL
 
 -- Left over from when Flyway managed the schema.
 DROP TABLE IF EXISTS flyway_schema_history;
+
+-- Bloom levels folded to three difficulties: remember + understand -> EASY, apply -> MEDIUM, analyse -> HARD.
+ALTER TABLE question DROP CONSTRAINT IF EXISTS ck_q_bloom;
+UPDATE question SET bloom_level = CASE bloom_level
+        WHEN 'REMEMBER' THEN 'EASY' WHEN 'UNDERSTAND' THEN 'EASY'
+        WHEN 'APPLY' THEN 'MEDIUM' WHEN 'ANALYZE' THEN 'HARD' END
+WHERE bloom_level IN ('REMEMBER', 'UNDERSTAND', 'APPLY', 'ANALYZE');
+ALTER TABLE question ADD CONSTRAINT ck_q_bloom CHECK (bloom_level IN ('EASY','MEDIUM','HARD'));
+UPDATE ai_generation_request SET bloom_level = CASE bloom_level
+        WHEN 'REMEMBER' THEN 'EASY' WHEN 'UNDERSTAND' THEN 'EASY'
+        WHEN 'APPLY' THEN 'MEDIUM' WHEN 'ANALYZE' THEN 'HARD' END
+WHERE bloom_level IN ('REMEMBER', 'UNDERSTAND', 'APPLY', 'ANALYZE');

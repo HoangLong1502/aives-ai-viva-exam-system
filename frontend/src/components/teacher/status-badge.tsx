@@ -3,11 +3,11 @@
 import { cn } from "cn";
 
 const VARIANTS = {
-  neutral: "bg-muted text-muted-foreground",
-  warning: "bg-amber-500/15 text-amber-900 dark:text-amber-200",
-  success: "bg-emerald-500/15 text-emerald-900 dark:text-emerald-200",
-  danger: "bg-destructive/15 text-destructive",
-  info: "bg-primary/10 text-primary",
+  neutral: "bg-muted text-muted-foreground ring-foreground/10",
+  warning: "bg-amber-500/12 text-amber-900 ring-amber-600/20 dark:text-amber-200",
+  success: "bg-emerald-500/12 text-emerald-900 ring-emerald-600/20 dark:text-emerald-200",
+  danger: "bg-destructive/10 text-destructive ring-destructive/20",
+  info: "bg-primary/8 text-primary ring-primary/15",
 } as const;
 
 export function StatusBadge({
@@ -22,7 +22,7 @@ export function StatusBadge({
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium",
+        "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset",
         VARIANTS[variant],
         className,
       )}

@@ -1,8 +1,8 @@
 package com.aives.config;
 
-import com.aives.auth.JwtAuthenticationFilter;
-import com.aives.auth.JwtService;
-import com.aives.user.UserRepository;
+import com.aives.auth.filter.JwtAuthenticationFilter;
+import com.aives.auth.service.JwtService;
+import com.aives.user.repository.UserRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;

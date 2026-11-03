@@ -74,6 +74,12 @@ function format(template: string, params?: Record<string, string>) {
   return template.replace(/\{(\w+)\}/g, (_, name: string) => params[name] ?? `{${name}}`);
 }
 
+/** Examiner lines follow the question language, separate from the interface language. */
+export function translate(locale: Locale, key: string, params?: Record<string, string>) {
+  const text = lookup(catalogs[locale], key) ?? lookup(catalogs.en, key) ?? key;
+  return format(text, params);
+}
+
 export function LocaleProvider({ children }: { children: ReactNode }) {
   const locale = useSyncExternalStore(subscribeLocale, currentLocale, () => "en" as Locale);
 

@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Loader2Icon } from "lucide-react";
+import Link from "next/link";
+import { ChevronRightIcon, Loader2Icon } from "lucide-react";
 import { toast } from "sonner";
 import { StatusBadge, attemptStatusVariant } from "@/components/teacher/status-badge";
 import { Button } from "@/components/ui/button";
@@ -18,6 +19,7 @@ export type Attempt = {
   teacherName: string;
   score: number | null;
   status: string;
+  attemptStatus?: string | null;
 };
 
 export function ScoreTable({
@@ -27,6 +29,7 @@ export function ScoreTable({
   needsGradingOnly = false,
   statusFilter = "",
   toolbar,
+  reviewHref,
 }: {
   path: string;
   canGrade?: boolean;
@@ -34,6 +37,8 @@ export function ScoreTable({
   needsGradingOnly?: boolean;
   statusFilter?: string;
   toolbar?: ReactNode;
+  /** Link to a row's detail page, or null when the row has none yet. */
+  reviewHref?: (row: Attempt) => string | null;
 }) {
   const { t, messages } = useLocale();
   const labels = messages.teacher.labels;
@@ -143,8 +148,20 @@ export function ScoreTable({
                   <p className="text-sm text-muted-foreground">{row.studentName}</p>
                   <div className="flex flex-wrap items-center gap-2">
                     <StatusBadge
-                      label={formatAttemptStatus(row.status, labels.attemptStatus)}
-                      variant={attemptStatusVariant(row.status)}
+                      label={
+                        row.attemptStatus
+                          ? row.attemptStatus === "SUBMITTED"
+                            ? labels.attemptStatus.attemptSubmitted
+                            : labels.attemptStatus.attemptWorking
+                          : formatAttemptStatus(row.status, labels.attemptStatus)
+                      }
+                      variant={
+                        row.attemptStatus
+                          ? row.attemptStatus === "SUBMITTED"
+                            ? "success"
+                            : "info"
+                          : attemptStatusVariant(row.status)
+                      }
                     />
                     {canGrade ? (
                       <span className="text-xs text-muted-foreground">{t("teacher.scores.teacherFinal")}</span>
@@ -179,7 +196,15 @@ export function ScoreTable({
                     </Button>
                   </div>
                 ) : (
-                  <p className="font-serif text-2xl tabular-nums">{row.score ?? "—"}</p>
+                  <div className="flex items-center gap-4">
+                    <p className="font-serif text-2xl tabular-nums">{row.score ?? "—"}</p>
+                    {reviewHref?.(row) ? (
+                      <Button variant="outline" size="sm" nativeButton={false} render={<Link href={reviewHref(row)!} />}>
+                        {t("student.scores.review")}
+                        <ChevronRightIcon />
+                      </Button>
+                    ) : null}
+                  </div>
                 )}
               </li>
             ))}

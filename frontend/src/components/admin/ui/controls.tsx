@@ -3,10 +3,10 @@ import { Button } from "@/components/ui/button";
 import { cn } from "cn";
 
 const fieldClass =
-  "w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20";
+  "w-full min-w-0 rounded-lg border border-input bg-card px-2.5 text-sm shadow-xs transition-[border-color,box-shadow] outline-none hover:border-foreground/20 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20";
 
 export function SelectControl({ className, ...props }: SelectHTMLAttributes<HTMLSelectElement>) {
-  return <select className={cn(fieldClass, "h-8", className)} {...props} />;
+  return <select className={cn(fieldClass, "h-9", className)} {...props} />;
 }
 
 export function TextArea({ className, ...props }: TextareaHTMLAttributes<HTMLTextAreaElement>) {

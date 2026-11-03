@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Loader2Icon } from "lucide-react";
 import { TeacherPageHeader } from "@/components/teacher/page-header";
+import { RubricAiDraft } from "@/components/teacher/rubric-ai-draft";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, FieldLabel } from "@/components/ui/field";
@@ -150,6 +151,17 @@ export function TeacherRubricsView() {
           </form>
         </CardContent>
       </Card>
+
+      <RubricAiDraft
+        subjectId={subjectId}
+        subjectLabel={(() => {
+          const subject = subjects.find((item) => item.id === subjectId);
+          return subject ? `${subject.code} — ${subject.name}` : "";
+        })()}
+        onSaved={() => {
+          void api<TeachingRubric[]>("/api/teaching/rubrics", { auth: true }).then(setRubrics);
+        }}
+      />
 
       <Card>
         <CardHeader>

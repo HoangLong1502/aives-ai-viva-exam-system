@@ -58,4 +58,4 @@ jobs:
           name: aives-api
           path: backend/target/aives-api-0.0.1.jar
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 50

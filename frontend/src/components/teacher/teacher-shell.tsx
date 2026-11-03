@@ -38,6 +38,14 @@ import { LanguageSwitch } from "@/components/language-switch";
 import { useLocale, useRoleLabel } from "@/lib/i18n/locale-provider";
 import { homeForRole } from "@/lib/role-home";
 import { useCurrentUser } from "@/lib/use-current-user";
+import {
+  shellAccountTriggerClass,
+  shellAsideClass,
+  shellBrandEyebrowClass,
+  shellHeaderClass,
+  shellMainClass,
+  shellNavItemClass,
+} from "@/components/shell-styles";
 import { cn } from "cn";
 
 const NAV = [
@@ -135,13 +143,13 @@ export function TeacherShell({ children }: { children: ReactNode }) {
   return (
     <TeacherShellContext.Provider value={{ collapsed, setCollapsed }}>
       <div className="flex min-h-svh flex-col bg-background">
-        <header className="flex h-16 items-center justify-between border-b bg-card/80 px-4 backdrop-blur sm:px-6">
+        <header className={shellHeaderClass}>
           <div className="flex min-w-0 items-center gap-3">
             <Link href="/teacher" className="flex shrink-0 items-center gap-3">
               <BrandMark className="size-8 text-base" />
               <div className="leading-tight">
                 <p className="font-serif text-lg">AIVES</p>
-                <p className="hidden text-[10px] uppercase tracking-[0.22em] text-muted-foreground sm:block">
+                <p className={shellBrandEyebrowClass}>
                   {t("roles.teacher")}
                 </p>
               </div>
@@ -153,7 +161,7 @@ export function TeacherShell({ children }: { children: ReactNode }) {
             <LanguageSwitch />
             <span className="hidden text-sm text-muted-foreground lg:block">{roleLabel}</span>
             <DropdownMenu>
-              <DropdownMenuTrigger className="inline-flex h-10 items-center gap-2 rounded-lg px-1.5 text-sm hover:bg-muted sm:px-2.5">
+              <DropdownMenuTrigger className={shellAccountTriggerClass}>
                 <Avatar size="sm">
                   <AvatarFallback>{initials(user.name)}</AvatarFallback>
                 </Avatar>
@@ -178,10 +186,7 @@ export function TeacherShell({ children }: { children: ReactNode }) {
 
         <div className="flex min-h-0 flex-1">
           <aside
-            className={cn(
-              "hidden shrink-0 border-r bg-card/40 transition-[width] duration-200 md:flex md:flex-col",
-              collapsed ? "w-[4.25rem]" : "w-60",
-            )}
+            className={shellAsideClass(collapsed)}
           >
             <div className={cn("flex p-2", collapsed ? "justify-center" : "justify-end")}>
               <Button
@@ -202,7 +207,7 @@ export function TeacherShell({ children }: { children: ReactNode }) {
             <div className="border-b md:hidden">
               <TeacherNav pathname={pathname} items={nav} compact />
             </div>
-            <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-8 sm:py-8">
+            <main className={shellMainClass}>
               <p className="mb-4 font-medium md:hidden">{pageTitle}</p>
               {children}
             </main>
@@ -241,13 +246,7 @@ function TeacherNav({
             href={item.href}
             aria-current={active ? "page" : undefined}
             title={collapsed ? item.label : undefined}
-            className={cn(
-              "flex items-center rounded-lg text-sm whitespace-nowrap",
-              collapsed ? "justify-center px-2 py-2.5" : "gap-2 px-3 py-2",
-              active
-                ? "bg-muted font-medium text-foreground"
-                : "text-muted-foreground hover:bg-muted/70 hover:text-foreground",
-            )}
+            className={shellNavItemClass({ active, collapsed, compact })}
           >
             <Icon className="size-4 shrink-0" aria-hidden />
             {!collapsed ? <span>{item.label}</span> : <span className="sr-only">{item.label}</span>}
