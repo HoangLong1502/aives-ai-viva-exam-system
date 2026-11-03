@@ -16,7 +16,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { api, ApiError } from "@/lib/api";
-import { useLocale } from "@/lib/i18n/locale-provider";
+import { translate, useLocale } from "@/lib/i18n/locale-provider";
 import { useSTT } from "@/lib/stt-service";
 import { formatBloom } from "@/lib/teacher/labels";
 import {
@@ -24,10 +24,9 @@ import {
   normalizeEnVoice,
   normalizeViVoice,
   cancelExamPrefetch,
-  holdExamPrefetch,
   playTTS,
-  releaseExamPrefetch,
   prefetchExamLines,
+  primeTTS,
   stopTTS,
   voiceForSpeech,
   type SpeechLang,
@@ -153,12 +152,16 @@ function interpretChoice(raw: string): "continue" | "next" | null {
   return null;
 }
 
+function examLine(prompt: string, key: string) {
+  return translate(detectSpeechLang(prompt) === "en-US" ? "en" : "vi", key);
+}
+
 function speakLine(text: string, viVoice: string, enVoice: string) {
   return new Promise<void>((resolve) => {
     let settled = false;
     const words = text.trim().split(/\s+/).length;
-    // ZeroTTS synthesizes before any sound. The safety timer starts once playback begins,
-    // and a longer one covers synthesis so the line is not cut off while the server is still working.
+    // Speech starts at the first audio chunk, while the rest is still being made.
+    // The guard stays long enough for that remainder; onEnd ends the turn as soon as the voice stops.
     let timer = 0;
     const finish = () => {
       if (settled) return;
@@ -171,9 +174,10 @@ function speakLine(text: string, viVoice: string, enVoice: string) {
     void playTTS(text, {
       voice: voiceForSpeech(lang, viVoice, enVoice),
       lang,
+      immediate: true,
       onStart: () => {
         window.clearTimeout(timer);
-        timer = window.setTimeout(finish, 20000 + words * 800);
+        timer = window.setTimeout(finish, Math.max(60_000, 20_000 + words * 800));
       },
       onEnd: finish,
       onError: finish,
@@ -204,6 +208,7 @@ export function StudentTests() {
   }, []);
 
   async function enter(session: Session) {
+    primeTTS();
     setLoadingQuestions(true);
     try {
       await api(`/api/student/exams/${session.id}/enter`, { method: "POST", auth: true });
@@ -462,7 +467,12 @@ function VivaExamRoom({
     startListeningRef.current();
   }, [setExamPhase, startAnswerClock]);
 
-  const speakThenListen = useCallback((text: string, after: "listen" | "choose") => {
+  const speakThenListen = useCallback((
+    text: string,
+    after: "listen" | "choose",
+    immediate = false,
+    markIndex?: number,
+  ) => {
     const run = ++runRef.current;
     stopListeningRef.current();
     setExamPhase("speaking");
@@ -481,10 +491,12 @@ function VivaExamRoom({
     void playTTS(text, {
       voice: voiceForSpeech(lang, voiceRef.current, enVoiceRef.current),
       lang,
+      immediate,
       onStart: () => {
         if (run !== runRef.current) return;
+        if (markIndex != null) countdownSpokenRef.current = markIndex;
         window.clearTimeout(timer);
-        timer = window.setTimeout(begin, 20000 + words * 800);
+        timer = window.setTimeout(begin, Math.max(60_000, 20_000 + words * 800));
       },
       onEnd: begin,
       onError: begin,
@@ -559,8 +571,7 @@ function VivaExamRoom({
     }
     const question = questions[currentIndex];
     if (!question || countdownSpokenRef.current === currentIndex) return;
-    countdownSpokenRef.current = currentIndex;
-    speakThenListenRef.current(question.prompt, "listen");
+    speakThenListenRef.current(question.prompt, "listen", false, currentIndex);
   }, [phase, countdown, currentIndex, questions, voiceReady]);
 
   useEffect(() => {
@@ -597,6 +608,7 @@ function VivaExamRoom({
   }, [onComplete, session.id, setExamPhase]);
 
   const submitAnswer = useCallback(async (raw: string, timeUp = false) => {
+    primeTTS();
     if (submittingRef.current) return;
     // When the answer clock runs out the answer is sent as it stands, even mid-replay or before speaking.
     const allowed: Phase[] = timeUp ? ["listening", "ready", "speaking"] : ["listening"];
@@ -608,7 +620,6 @@ function VivaExamRoom({
     runRef.current += 1;
     stopListeningRef.current();
     stopTTS();
-    holdExamPrefetch();
     setExamPhase("evaluating");
 
     const parent = parentTurnRef.current;
@@ -642,7 +653,7 @@ function VivaExamRoom({
             : last
               ? "student.tests.recordedDone"
               : "student.tests.recordedMove";
-        const bridge = tRef.current(bridgeKey);
+        const bridge = examLine(question.prompt, bridgeKey);
         const speaking = speakLine(
           [result.feedback, bridge].filter(Boolean).join(" "),
           voiceRef.current,
@@ -656,7 +667,7 @@ function VivaExamRoom({
         if (!mountedRef.current) return;
         if (last) {
           // The exam only ends when the student submits it.
-          pushBubble("examiner", tRef.current("student.tests.allDoneHint"));
+          pushBubble("examiner", examLine(question.prompt, "student.tests.allDoneHint"));
           setExamPhase("done");
         } else setCurrentIndex((value) => Math.min(questions.length - 1, value + 1));
         return;
@@ -664,20 +675,29 @@ function VivaExamRoom({
 
       if (action === "FOLLOW_UP" && result.followUpQuestion) {
         followUpRef.current = result.followUpQuestion;
-        const spoken = [result.feedback, result.followUpQuestion].filter((part) => part && part.trim()).join(" ");
-        speakThenListenRef.current(spoken, "listen");
         setFollowUpPrompt(result.followUpQuestion);
         if (answer) pushBubble("student", answer);
         if (result.feedback) pushBubble("examiner", result.feedback);
         pushBubble("examiner", result.followUpQuestion);
+        setExamPhase("speaking");
+        if (result.feedback?.trim()) {
+          await speakLine(result.feedback, voiceRef.current, enVoiceRef.current);
+        }
+        if (!mountedRef.current) return;
+        speakThenListenRef.current(result.followUpQuestion, "listen", false);
         return;
       }
 
-      const choice = tRef.current("student.tests.choosePrompt");
-      speakThenListenRef.current([result.feedback, choice].filter(Boolean).join(" "), "choose");
+      const choice = examLine(question.prompt, "student.tests.choosePrompt");
       if (answer) pushBubble("student", answer);
       if (result.feedback) pushBubble("examiner", result.feedback);
       pushBubble("examiner", choice);
+      setExamPhase("speaking");
+      if (result.feedback?.trim()) {
+        await speakLine(result.feedback, voiceRef.current, enVoiceRef.current);
+      }
+      if (!mountedRef.current) return;
+      speakThenListenRef.current(choice, "choose", false);
     } catch (err) {
       if (!mountedRef.current) return;
       if (err instanceof ApiError && err.status === 409 && /time is up for this question/i.test(err.message)) {
@@ -692,7 +712,7 @@ function VivaExamRoom({
         stopAnswerClock();
         // Resuming after a reload: this question was already answered, so move on.
         if (indexRef.current >= questions.length - 1) {
-          pushBubble("examiner", tRef.current("student.tests.allDoneHint"));
+          pushBubble("examiner", examLine(question.prompt, "student.tests.allDoneHint"));
           setExamPhase("done");
         } else setCurrentIndex((value) => Math.min(questions.length - 1, value + 1));
         return;
@@ -703,7 +723,6 @@ function VivaExamRoom({
       startListeningRef.current();
     } finally {
       submittingRef.current = false;
-      releaseExamPrefetch();
     }
   }, [pushBubble, questions, session.id, setExamPhase, stopAnswerClock]);
 
@@ -717,7 +736,7 @@ function VivaExamRoom({
     const question = questions[indexRef.current];
     if (!question) return;
     const prompt = followUpRef.current || question.prompt;
-    speakThenListen(prompt, "listen");
+    speakThenListen(prompt, "listen", prompt !== question.prompt);
     pushBubble("examiner", prompt);
   }, [pushBubble, questions, speakThenListen]);
 
@@ -782,7 +801,10 @@ function VivaExamRoom({
       const choice = interpretChoice(transcriptRef.current);
       if (choice === "continue") continueRef.current();
       else if (choice === "next") skipRef.current();
-      else toast.message(tRef.current("student.tests.chooseUnclear"));
+      else {
+        const asked = questionsRef.current[indexRef.current]?.prompt ?? "";
+        toast.message(examLine(asked, "student.tests.chooseUnclear"));
+      }
     }, 1200);
     return () => window.clearTimeout(id);
   }, [phase, transcript]);
@@ -836,7 +858,7 @@ function VivaExamRoom({
   function replay() {
     if (!currentQuestion || phase === "evaluating" || phase === "countdown") return;
     const text = followUpPrompt || currentQuestion.prompt;
-    speakThenListen(text, phase === "choose" ? "choose" : "listen");
+    speakThenListen(text, phase === "choose" ? "choose" : "listen", text !== currentQuestion.prompt);
   }
 
   function requestLeave() {
@@ -876,8 +898,8 @@ function VivaExamRoom({
           : phase === "evaluating"
             ? t("student.tests.thinking")
             : phase === "choose"
-              ? t("student.tests.choosePrompt")
-              : t("student.tests.allDoneHint");
+              ? examLine(currentQuestion.prompt, "student.tests.choosePrompt")
+              : examLine(currentQuestion.prompt, "student.tests.allDoneHint");
 
   return (
     <div className="space-y-6">
@@ -1042,10 +1064,10 @@ function VivaExamRoom({
           {phase === "choose" ? (
             <div className="flex flex-col gap-2 sm:flex-row">
               <Button type="button" className="flex-1" onClick={continueQuestion}>
-                {t("student.tests.chooseContinue")}
+                {examLine(currentQuestion.prompt, "student.tests.chooseContinue")}
               </Button>
               <Button type="button" variant="outline" className="flex-1" onClick={skipQuestion}>
-                {t("student.tests.chooseNext")}
+                {examLine(currentQuestion.prompt, "student.tests.chooseNext")}
               </Button>
             </div>
           ) : null}

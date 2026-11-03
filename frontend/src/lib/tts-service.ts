@@ -160,17 +160,27 @@ export async function checkZeroTTSStatus(baseUrl = ZEROTTS_DEFAULT_URL): Promise
 
 type PreparedClip = {
   status: "loading" | "ready";
+  voice: string;
+  text: string;
   blob?: Blob;
   promise: Promise<Blob>;
   controller: AbortController;
 };
 
+type PrefetchJob = {
+  voice: string;
+  text: string;
+  promise: Promise<Blob>;
+  resolve: (blob: Blob) => void;
+  reject: (reason: unknown) => void;
+};
+
 const preparedClips = new Map<string, PreparedClip>();
-const prefetchQueue: { voice: string; text: string }[] = [];
+const prefetchQueue: PrefetchJob[] = [];
+/** Questions that wait until the one being read has finished loading. */
+const parked: PrefetchJob[] = [];
 let prefetchRunning = false;
-let prefetchGeneration = 0;
-let synthesisBusy = 0;
-let prefetchHold = 0;
+let liveActive = 0;
 
 function clipKey(voice: string, text: string) {
   return `${voice}\n${text.trim()}`;
@@ -197,100 +207,210 @@ function wavBlob(chunks: Uint8Array[]): Blob {
   return new Blob([wav], { type: "audio/wav" });
 }
 
-function rememberClip(voice: string, text: string, blob: Blob) {
-  const key = clipKey(voice, text);
-  preparedClips.set(key, {
-    status: "ready",
-    blob,
-    promise: Promise.resolve(blob),
-    controller: new AbortController(),
+function createJob(voice: string, text: string): PrefetchJob {
+  let resolve!: (blob: Blob) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<Blob>((res, rej) => {
+    resolve = res;
+    reject = rej;
   });
+  promise.catch(() => {});
+  return { voice, text, promise, resolve, reject };
 }
 
-function beginSynthesis() {
-  synthesisBusy += 1;
+/** One synthesis at a time. A ready or in-flight clip is reused, so playback never starts a second request. */
+function enqueueClip(voice: string, text: string, front: boolean): Promise<Blob> {
+  const key = clipKey(voice, text);
+  const existing = preparedClips.get(key);
+  if (existing) return existing.promise;
+
+  const queuedIndex = prefetchQueue.findIndex((job) => clipKey(job.voice, job.text) === key);
+  if (queuedIndex >= 0) {
+    const [job] = prefetchQueue.splice(queuedIndex, 1);
+    if (front) prefetchQueue.unshift(job);
+    else prefetchQueue.push(job);
+    return job.promise;
+  }
+  const parkedIndex = parked.findIndex((job) => clipKey(job.voice, job.text) === key);
+  if (parkedIndex >= 0) {
+    const [job] = parked.splice(parkedIndex, 1);
+    if (front) prefetchQueue.unshift(job);
+    else prefetchQueue.push(job);
+    void runPrefetch();
+    return job.promise;
+  }
+
+  const job = createJob(voice, text);
+  if (front) prefetchQueue.unshift(job);
+  else prefetchQueue.push(job);
+  void runPrefetch();
+  return job.promise;
 }
 
-function endSynthesis() {
-  synthesisBusy = Math.max(0, synthesisBusy - 1);
-  if (synthesisBusy === 0) void runPrefetch();
+let speakTail: Promise<void> = Promise.resolve();
+
+/** Only one /speak may run. A second request makes the server cut the first utterance short. */
+function enqueueSpeak<T>(task: () => Promise<T>): Promise<T> {
+  const run = speakTail.then(task, task);
+  speakTail = run.then(() => undefined, () => undefined);
+  return run;
 }
 
 async function downloadClip(voice: string, text: string, signal: AbortSignal): Promise<Blob> {
-  const response = await fetch(speakUrl(voice, text), { signal });
-  if (!response.ok) throw new Error(`ZeroTTS ${response.status}`);
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  return wavBlob([bytes]);
+  return enqueueSpeak(async () => {
+    if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+    const response = await fetch(speakUrl(voice, text), { signal });
+    if (!response.ok) throw new Error(`ZeroTTS ${response.status}`);
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+    assertAudible(bytes, text);
+    return wavBlob([bytes]);
+  });
 }
 
-function abortLoadingPrefetch() {
-  for (const clip of preparedClips.values()) {
-    if (clip.status === "loading") clip.controller.abort();
+function releaseParked() {
+  if (parked.length === 0) return;
+  prefetchQueue.push(...parked.splice(0, parked.length));
+}
+
+function holdServer(): () => void {
+  liveActive += 1;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    liveActive = Math.max(0, liveActive - 1);
+    if (liveActive === 0) {
+      queueMicrotask(() => {
+        if (liveActive === 0) void runPrefetch();
+      });
+    }
+  };
+}
+
+function forgetQueued(voice: string, text: string) {
+  const key = clipKey(voice, text);
+  for (const queue of [prefetchQueue, parked]) {
+    for (let i = queue.length - 1; i >= 0; i -= 1) {
+      if (clipKey(queue[i].voice, queue[i].text) !== key) continue;
+      const [job] = queue.splice(i, 1);
+      job.reject(new DOMException("Played live", "AbortError"));
+    }
   }
 }
 
-/** Free the speech server while the examiner's reply is being written. */
-export function holdExamPrefetch() {
-  prefetchHold += 1;
-  abortLoadingPrefetch();
+function wavSeconds(bytes: Uint8Array): number {
+  if (bytes.byteLength < 44) return 0;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const rate = view.getUint32(24, true);
+  if (!rate) return 0;
+  return (bytes.byteLength - 44) / 2 / rate;
 }
 
-export function releaseExamPrefetch() {
-  prefetchHold = Math.max(0, prefetchHold - 1);
-  if (prefetchHold === 0) void runPrefetch();
+/** A preempted /speak still ends as HTTP 200 with a short fragment of a long question. */
+function assertAudible(bytes: Uint8Array, text: string) {
+  if (bytes.byteLength <= 44) throw new Error("ZeroTTS returned no audio");
+  const words = text.trim().split(/\s+/).filter(Boolean).length;
+  const seconds = wavSeconds(bytes);
+  const minimum = words >= 12 ? words * 0.22 : words >= 6 ? 0.45 : 0;
+  if (seconds < minimum) throw new Error("ZeroTTS returned a cut-off recording");
+}
+
+function displaceInFlight(): PrefetchJob | null {
+  for (const [key, clip] of preparedClips) {
+    if (clip.status !== "loading") continue;
+    const job = createJob(clip.voice, clip.text);
+    clip.controller.abort();
+    preparedClips.delete(key);
+    return job;
+  }
+  return null;
 }
 
 async function runPrefetch() {
-  if (prefetchRunning || synthesisBusy > 0 || prefetchHold > 0) return;
+  if (prefetchRunning || liveActive > 0) return;
   prefetchRunning = true;
   try {
-    while (prefetchQueue.length > 0 && synthesisBusy === 0 && prefetchHold === 0) {
-      const next = prefetchQueue.shift();
-      if (!next) break;
-      const key = clipKey(next.voice, next.text);
-      if (preparedClips.has(key)) continue;
+    while (prefetchQueue.length > 0 && liveActive === 0) {
+      const job = prefetchQueue.shift();
+      if (!job) break;
+      const key = clipKey(job.voice, job.text);
+      const already = preparedClips.get(key);
+      if (already) {
+        already.promise.then(job.resolve, job.reject);
+        continue;
+      }
       const controller = new AbortController();
-      const generation = prefetchGeneration;
-      const promise = downloadClip(next.voice, next.text, controller.signal);
-      const clip: PreparedClip = { status: "loading", promise, controller };
+      const clip: PreparedClip = {
+        status: "loading",
+        voice: job.voice,
+        text: job.text,
+        promise: job.promise,
+        controller,
+      };
       preparedClips.set(key, clip);
       try {
-        clip.blob = await promise;
+        const blob = await downloadClip(job.voice, job.text, controller.signal);
+        clip.blob = blob;
         clip.status = "ready";
-      } catch {
+        job.resolve(blob);
+        releaseParked();
+      } catch (error) {
         if (preparedClips.get(key)?.controller === controller) preparedClips.delete(key);
-        if (controller.signal.aborted && generation === prefetchGeneration) prefetchQueue.unshift(next);
+        job.reject(error);
       }
     }
   } finally {
     prefetchRunning = false;
-    if (prefetchQueue.length > 0 && synthesisBusy === 0 && prefetchHold === 0) void runPrefetch();
+    if (liveActive === 0 && prefetchQueue.length > 0) void runPrefetch();
   }
 }
 
-/** Prepare each question's reading in the background, one complete clip per prompt.
- *  Lines are in priority order: a later call moves a not-yet-started prompt forward. */
+function findJob(voice: string, text: string): PrefetchJob | null {
+  const key = clipKey(voice, text);
+  return (
+    prefetchQueue.find((job) => clipKey(job.voice, job.text) === key) ??
+    parked.find((job) => clipKey(job.voice, job.text) === key) ??
+    null
+  );
+}
+
+/** Load the current question first. Later questions stay parked until that file is ready. */
 export function prefetchExamLines(lines: { text: string; voice: string }[]) {
-  const incoming: { voice: string; text: string }[] = [];
-  const incomingKeys = new Set<string>();
+  const jobs: PrefetchJob[] = [];
+  const seen = new Set<string>();
+  let currentLoading = false;
   for (const line of lines) {
     const text = line.text.trim();
     if (!text || !isZeroTtsVoice(line.voice)) continue;
     const key = clipKey(line.voice, text);
-    if (preparedClips.has(key) || incomingKeys.has(key)) continue;
-    incomingKeys.add(key);
-    incoming.push({ voice: line.voice, text });
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const clip = preparedClips.get(key);
+    if (clip?.status === "ready") continue;
+    if (clip?.status === "loading") {
+      if (jobs.length === 0) currentLoading = true;
+      continue;
+    }
+    jobs.push(findJob(line.voice, text) ?? createJob(line.voice, text));
   }
-  const rest = prefetchQueue.filter((item) => !incomingKeys.has(clipKey(item.voice, item.text)));
   prefetchQueue.length = 0;
-  prefetchQueue.push(...incoming, ...rest);
+  parked.length = 0;
+  if (currentLoading) {
+    parked.push(...jobs);
+    return;
+  }
+  if (jobs.length === 0) return;
+  prefetchQueue.push(jobs[0]);
+  parked.push(...jobs.slice(1));
   void runPrefetch();
 }
 
 /** Stop background preparation when the student leaves the exam. Ready clips stay cached. */
 export function cancelExamPrefetch() {
-  prefetchGeneration += 1;
-  prefetchQueue.length = 0;
+  const pending = prefetchQueue.splice(0, prefetchQueue.length);
+  pending.push(...parked.splice(0, parked.length));
+  for (const job of pending) job.reject(new DOMException("Aborted", "AbortError"));
   for (const [key, clip] of preparedClips) {
     if (clip.status !== "loading") continue;
     clip.controller.abort();
@@ -333,6 +453,8 @@ export type PlayTTSOptions = {
   onEnd?: () => void;
   onError?: (err?: unknown) => void;
   onEngineUsed?: (engine: "ZeroTTS" | "Browser-Google") => void;
+  /** Start speaking as the first audio arrives. Exam questions wait for one whole recording. */
+  immediate?: boolean;
 };
 
 /**
@@ -352,6 +474,7 @@ export async function playTTS(
     onEnd,
     onError,
     onEngineUsed,
+    immediate = false,
   } = options;
 
   stopTTS();
@@ -385,36 +508,63 @@ export async function playTTS(
 
   if (controller.signal.aborted) return () => {};
 
-  const clipId = clipKey(zeroVoice, cleanText);
-  const prepared = preparedClips.get(clipId);
-  if (prepared) {
-    try {
-      const blob = prepared.blob ?? (await prepared.promise);
+  const cached = preparedClips.get(clipKey(zeroVoice, cleanText));
+  let heard = false;
+  try {
+    if (cached?.status === "ready" && cached.blob) {
+      onEngineUsed?.("ZeroTTS");
+      await playCompleteWav(new Uint8Array(await cached.blob.arrayBuffer()), controller.signal, {
+        onStart: () => {
+          heard = true;
+          onStart?.();
+        },
+        onEnd,
+      });
+      return () => stopTTS();
+    }
+    if (!immediate) {
+      const release = holdServer();
+      try {
+        let blob: Blob;
+        try {
+          if (cached?.status === "ready" && cached.blob) blob = cached.blob;
+          else if (cached?.status === "loading") blob = await cached.promise;
+          else blob = await takeExamClip(zeroVoice, cleanText, controller.signal);
+        } catch {
+          if (controller.signal.aborted) return () => {};
+          preparedClips.delete(clipKey(zeroVoice, cleanText));
+          blob = await takeExamClip(zeroVoice, cleanText, controller.signal);
+        }
+        if (controller.signal.aborted) return () => {};
+        release();
+        onEngineUsed?.("ZeroTTS");
+        await playCompleteWav(new Uint8Array(await blob.arrayBuffer()), controller.signal, {
+          onStart: () => {
+            heard = true;
+            onStart?.();
+          },
+          onEnd,
+        });
+        return () => stopTTS();
+      } finally {
+        release();
+      }
+    }
+    if (cached?.status === "loading") {
+      const blob = await cached.promise;
       if (controller.signal.aborted) return () => {};
       onEngineUsed?.("ZeroTTS");
-      await playCompleteWav(new Uint8Array(await blob.arrayBuffer()), controller.signal, { onStart, onEnd });
+      await playCompleteWav(new Uint8Array(await blob.arrayBuffer()), controller.signal, {
+        onStart: () => {
+          heard = true;
+          onStart?.();
+        },
+        onEnd,
+      });
       return () => stopTTS();
-    } catch {
-      if (controller.signal.aborted) return () => {};
-      preparedClips.delete(clipId);
     }
-  }
-
-  let heard = false;
-  let synthesisClosed = false;
-  const closeSynthesis = () => {
-    if (synthesisClosed) return;
-    synthesisClosed = true;
-    endSynthesis();
-  };
-  beginSynthesis();
-  try {
-    const blob = await downloadClip(zeroVoice, cleanText, controller.signal);
-    closeSynthesis();
-    if (controller.signal.aborted) return () => {};
-    rememberClip(zeroVoice, cleanText, blob);
     onEngineUsed?.("ZeroTTS");
-    await playCompleteWav(new Uint8Array(await blob.arrayBuffer()), controller.signal, {
+    await speakImmediate(zeroVoice, cleanText, controller.signal, {
       onStart: () => {
         heard = true;
         onStart?.();
@@ -427,8 +577,165 @@ export async function playTTS(
     if (!heard) failOver();
     else onError?.();
     return () => stopTTS();
+  }
+}
+
+/** Download the question on its own while the server is held, so a background question cannot cancel it. */
+async function takeExamClip(voice: string, text: string, signal: AbortSignal): Promise<Blob> {
+  const key = clipKey(voice, text);
+  const existing = preparedClips.get(key);
+  if (existing?.status === "ready" && existing.blob) return existing.blob;
+  if (existing?.status === "loading") return existing.promise;
+
+  const displaced = displaceInFlight();
+  if (displaced && clipKey(displaced.voice, displaced.text) !== key) parked.unshift(displaced);
+  forgetQueued(voice, text);
+
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  if (signal.aborted) controller.abort();
+  else signal.addEventListener("abort", abort, { once: true });
+  const promise = downloadClip(voice, text, controller.signal);
+  const clip: PreparedClip = {
+    status: "loading",
+    voice,
+    text,
+    promise,
+    controller,
+  };
+  preparedClips.set(key, clip);
+  try {
+    const blob = await promise;
+    if (preparedClips.get(key)?.controller === controller) {
+      clip.blob = blob;
+      clip.status = "ready";
+      clip.promise = Promise.resolve(blob);
+    }
+    return blob;
+  } catch (error) {
+    if (preparedClips.get(key)?.controller === controller) preparedClips.delete(key);
+    throw error;
   } finally {
-    closeSynthesis();
+    signal.removeEventListener("abort", abort);
+  }
+}
+
+/** Break a reply into short sentences so each one can be loaded whole, then spoken smoothly. */
+function replyPieces(text: string): string[] {
+  const cleaned = text.replace(/\s+/g, " ").trim();
+  if (!cleaned) return [];
+  const rough = cleaned.split(/(?<=[.!?…。])\s+|\n+/);
+  const pieces: string[] = [];
+  for (const part of rough) {
+    const words = part.trim().split(/\s+/).filter(Boolean);
+    if (words.length === 0) continue;
+    if (words.length <= 14) {
+      pieces.push(words.join(" "));
+      continue;
+    }
+    let buf: string[] = [];
+    for (const word of words) {
+      buf.push(word);
+      const atBreak = /[,;:]$/.test(word) && buf.length >= 8;
+      if (atBreak || buf.length >= 14) {
+        pieces.push(buf.join(" "));
+        buf = [];
+      }
+    }
+    if (buf.length > 0) pieces.push(buf.join(" "));
+  }
+  const merged: string[] = [];
+  for (const piece of pieces) {
+    const prev = merged[merged.length - 1];
+    const count = piece.split(/\s+/).length;
+    if (prev && count < 3 && prev.split(/\s+/).length + count <= 14) {
+      merged[merged.length - 1] = `${prev} ${piece}`;
+    } else {
+      merged.push(piece);
+    }
+  }
+  return merged;
+}
+
+async function downloadSentence(voice: string, text: string, signal: AbortSignal): Promise<Blob> {
+  const key = clipKey(voice, text);
+  const existing = preparedClips.get(key);
+  if (existing?.status === "ready" && existing.blob) return existing.blob;
+  if (existing?.status === "loading") return existing.promise;
+  const blob = await enqueueSpeak(async () => {
+    if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+    const response = await fetch(speakUrl(voice, text), { signal });
+    if (!response.ok) throw new Error(`ZeroTTS ${response.status}`);
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+    assertAudible(bytes, text);
+    return wavBlob([bytes]);
+  });
+  preparedClips.set(key, {
+    status: "ready",
+    voice,
+    text,
+    blob,
+    promise: Promise.resolve(blob),
+    controller: new AbortController(),
+  });
+  return blob;
+}
+
+/** Load one short sentence completely, play it in one piece, and prepare the next sentence while it plays. */
+async function speakImmediate(
+  voice: string,
+  text: string,
+  signal: AbortSignal,
+  hooks: { onStart?: () => void; onEnd?: () => void },
+): Promise<void> {
+  const pieces = replyPieces(text);
+  if (pieces.length === 0) return;
+  const release = holdServer();
+  forgetQueued(voice, text);
+  const displaced = displaceInFlight();
+  if (displaced) prefetchQueue.unshift(displaced);
+  let played = false;
+  let ended = false;
+  const finish = () => {
+    if (ended || signal.aborted) return;
+    ended = true;
+    hooks.onEnd?.();
+  };
+  try {
+    let upcoming: Promise<Blob> | null = downloadSentence(voice, pieces[0], signal);
+    for (let i = 0; i < pieces.length; i += 1) {
+      let blob: Blob | null = null;
+      try {
+        blob = await upcoming;
+      } catch {
+        if (signal.aborted) return;
+        blob = null;
+      }
+      if (!blob && !signal.aborted) {
+        try {
+          blob = await downloadSentence(voice, pieces[i], signal);
+        } catch {
+          if (signal.aborted) return;
+          blob = null;
+        }
+      }
+      if (signal.aborted) return;
+      const next = pieces[i + 1];
+      upcoming = next ? downloadSentence(voice, next, signal) : null;
+      if (!blob) continue;
+      const last = i === pieces.length - 1;
+      await playCompleteWav(new Uint8Array(await blob.arrayBuffer()), signal, {
+        onStart: played ? undefined : hooks.onStart,
+        onEnd: last ? finish : undefined,
+      });
+      played = true;
+      if (signal.aborted) return;
+    }
+    if (!played) throw new Error("ZeroTTS returned no audio");
+    finish();
+  } finally {
+    release();
   }
 }
 
@@ -437,6 +744,12 @@ function audioCtx(): AudioContext {
     audioContext = new AudioContext();
   }
   return audioContext;
+}
+
+/** Call from the click that opens the exam so the first question is allowed to play. */
+export function primeTTS(): void {
+  const ctx = audioCtx();
+  void ctx.resume().catch(() => {});
 }
 
 /** Play one saved recording at its original speed. */

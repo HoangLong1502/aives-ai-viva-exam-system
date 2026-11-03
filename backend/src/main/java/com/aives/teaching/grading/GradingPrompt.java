@@ -129,7 +129,7 @@ public final class GradingPrompt {
                 - When the answer deserves 100, set studentStuck false and followUpQuestion null.
                 - Judge the answer at the depth the question's difficulty asks for (definitions below). Do not demand analysis for an EASY question, and keep any follow-up at the same difficulty.
                 - feedback: 1-2 short sentences the student will hear aloud.
-                - Write feedback, comments and followUpQuestion in %s.
+                - Write feedback, comments and followUpQuestion entirely in %s. Do not mix in another language, even when the student answers in a different language.
 
                 Return ONE JSON object only, no markdown, with exactly these fields:
                 {
