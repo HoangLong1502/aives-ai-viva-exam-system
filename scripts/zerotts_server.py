@@ -120,7 +120,7 @@ def next_speak_token() -> int:
 
 
 def iter_wav(text: str, voice: str, token: int):
-    """Stream one script. A newer /speak request stops this one at the next chunk."""
+    """Stream one script. A live reply preempts a question that is still being prepared."""
     model = get_tts()
     with synthesis_lock:
         if token != speak_token:
@@ -132,11 +132,11 @@ def iter_wav(text: str, voice: str, token: int):
             for chunk in model.synthesize_stream(
                 text,
                 voice=voice,
-                first_chunk_frames=8,
-                max_chunk_frames=16,
+                first_chunk_frames=2,
+                max_chunk_frames=8,
             ):
                 if token != speak_token:
-                    print("[ZeroTTS] dừng câu cũ để đọc script mới")
+                    print("[ZeroTTS] nhường máy cho câu trả lời mới")
                     return
                 samples = np.clip(np.asarray(chunk, dtype=np.float32).reshape(-1), -1.0, 1.0)
                 if samples.size == 0:
@@ -159,9 +159,8 @@ def speak(
     clean_text = text.strip()
     if not clean_text:
         raise HTTPException(status_code=400, detail="Text không được để trống")
-    token = next_speak_token()
     return StreamingResponse(
-        iter_wav(clean_text, voice, token),
+        iter_wav(clean_text, voice, next_speak_token()),
         media_type="audio/wav",
         headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
     )
