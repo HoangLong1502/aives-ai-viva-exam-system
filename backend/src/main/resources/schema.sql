@@ -256,9 +256,9 @@ CREATE INDEX idx_attempt_student ON exam_attempt (student_id);
 CREATE INDEX idx_session_teacher ON exam_session (teacher_id);
 CREATE UNIQUE INDEX uq_user_student_code ON "user" (student_code) WHERE student_code IS NOT NULL;
 CREATE INDEX idx_user_full_name ON "user" (lower(full_name));
--- The same file can be uploaded once per teacher and subject, unless the earlier upload failed.
+-- The same file can be uploaded once per subject, unless the earlier upload failed.
 CREATE UNIQUE INDEX uq_course_document_content
-    ON course_document (course_id, uploaded_by, content_hash)
+    ON course_document (course_id, content_hash)
     WHERE content_hash IS NOT NULL AND extraction_status <> 'FAILED';
 CREATE INDEX idx_course_document_status ON course_document (extraction_status);
 
