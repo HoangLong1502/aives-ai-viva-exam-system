@@ -59,15 +59,15 @@ public class DocumentRepository {
         );
     }
 
-    public Optional<String> activeDuplicateName(String teacherId, String subjectId, String hash) {
+    /** The same file contents count once per subject, whoever uploaded them. */
+    public Optional<String> activeDuplicateName(String subjectId, String hash) {
         return jdbc.query(
                 """
                 SELECT original_name FROM course_document
-                WHERE uploaded_by = ?::uuid AND course_id = ?::uuid AND content_hash = ?
+                WHERE course_id = ?::uuid AND content_hash = ?
                   AND extraction_status <> 'FAILED'
                 """,
                 (rs, row) -> rs.getString(1),
-                teacherId,
                 subjectId,
                 hash
         ).stream().findFirst();
@@ -153,29 +153,13 @@ public class DocumentRepository {
         );
     }
 
-    public String subjectIdOf(String teacherId, String documentId) {
+    public String subjectIdOf(String documentId) {
         List<String> rows = jdbc.query(
-                """
-                SELECT course_id::text FROM course_document
-                WHERE id = ?::uuid AND uploaded_by = ?::uuid
-                """,
+                "SELECT course_id::text FROM course_document WHERE id = ?::uuid",
                 (rs, row) -> rs.getString(1),
-                documentId,
-                teacherId
+                documentId
         );
         return rows.isEmpty() ? null : rows.getFirst();
-    }
-
-    public Optional<String> storagePathOf(String teacherId, String documentId) {
-        return jdbc.query(
-                """
-                SELECT storage_path FROM course_document
-                WHERE id = ?::uuid AND uploaded_by = ?::uuid
-                """,
-                (rs, row) -> rs.getString(1),
-                documentId,
-                teacherId
-        ).stream().findFirst();
     }
 
     public Optional<String> storagePathOf(String documentId) {
@@ -187,7 +171,7 @@ public class DocumentRepository {
     }
 
     /** Removes the document together with its chunks and the question links that point at them. */
-    public void deleteWithChunks(String teacherId, String documentId) {
+    public void deleteWithChunks(String documentId) {
         jdbc.update(
                 """
                 DELETE FROM question_source_chunk
@@ -196,20 +180,15 @@ public class DocumentRepository {
                 documentId
         );
         jdbc.update("DELETE FROM knowledge_chunk WHERE document_id = ?::uuid", documentId);
-        jdbc.update(
-                "DELETE FROM course_document WHERE id = ?::uuid AND uploaded_by = ?::uuid",
-                documentId,
-                teacherId
-        );
+        jdbc.update("DELETE FROM course_document WHERE id = ?::uuid", documentId);
     }
 
-    /** Renames the topic of the document and its chunks; false when the teacher does not own it. */
-    public boolean updateTopic(String teacherId, String documentId, String topic) {
+    /** Renames the topic of the document and its chunks; false when the document does not exist. */
+    public boolean updateTopic(String documentId, String topic) {
         int updated = jdbc.update(
-                "UPDATE course_document SET topic = ? WHERE id = ?::uuid AND uploaded_by = ?::uuid",
+                "UPDATE course_document SET topic = ? WHERE id = ?::uuid",
                 topic,
-                documentId,
-                teacherId
+                documentId
         );
         if (updated == 0) {
             return false;
@@ -218,25 +197,23 @@ public class DocumentRepository {
         return true;
     }
 
-    public List<DocumentItem> list(String teacherId, String subjectId) {
+    public List<DocumentItem> list(String subjectId) {
         return jdbc.query(
                 DOCUMENT_SELECT + """
-                        WHERE d.uploaded_by = ?::uuid AND d.course_id = ?::uuid
+                        WHERE d.course_id = ?::uuid
                         GROUP BY d.id
                         ORDER BY d.created_at DESC
                         """,
                 (rs, row) -> documentItem(rs),
-                teacherId,
                 subjectId
         );
     }
 
-    public Optional<DocumentItem> find(String teacherId, String documentId) {
+    public Optional<DocumentItem> find(String documentId) {
         return jdbc.query(
-                DOCUMENT_SELECT + " WHERE d.id = ?::uuid AND d.uploaded_by = ?::uuid GROUP BY d.id",
+                DOCUMENT_SELECT + " WHERE d.id = ?::uuid GROUP BY d.id",
                 (rs, row) -> documentItem(rs),
-                documentId,
-                teacherId
+                documentId
         ).stream().findFirst();
     }
 
@@ -250,25 +227,6 @@ public class DocumentRepository {
                 """,
                 (rs, row) -> new ChunkText(rs.getString(1), rs.getString(2)),
                 documentId,
-                limit
-        );
-    }
-
-    public List<VivaQuestionGenerator.Passage> nearestForTeacher(
-            String teacherId, String subjectId, String vectorLiteral, int limit) {
-        return jdbc.query(
-                """
-                SELECT c.title, c.source_label, c.content
-                FROM knowledge_chunk c
-                JOIN course_document d ON d.id = c.document_id
-                WHERE d.uploaded_by = ?::uuid AND d.course_id = ?::uuid AND d.extraction_status = 'DONE'
-                ORDER BY c.embedding <=> ?::vector
-                LIMIT ?
-                """,
-                (rs, row) -> passage(rs),
-                teacherId,
-                subjectId,
-                vectorLiteral,
                 limit
         );
     }

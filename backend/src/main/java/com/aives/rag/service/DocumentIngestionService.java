@@ -114,7 +114,7 @@ public class DocumentIngestionService {
             throw new ApiException(HttpStatus.BAD_REQUEST, "The file content does not match its ." + extension + " extension");
         }
 
-        Optional<String> duplicate = documents.activeDuplicateName(teacherId, subjectId, hash);
+        Optional<String> duplicate = documents.activeDuplicateName(subjectId, hash);
         if (duplicate.isPresent()) {
             delete(stored);
             throw new ApiException(HttpStatus.CONFLICT, "This file was already uploaded as \"" + duplicate.get() + "\"");
@@ -143,7 +143,7 @@ public class DocumentIngestionService {
             throw exception;
         }
         schedule(id.toString());
-        return document(teacherId, id.toString());
+        return document(id.toString());
     }
 
     /** Re-queues documents interrupted by a restart. */
@@ -227,41 +227,41 @@ public class DocumentIngestionService {
         documents.storagePathOf(documentId).ifPresent(path -> delete(Path.of(path)));
     }
 
-    public String subjectIdOf(String teacherId, String documentId) {
-        return documents.subjectIdOf(teacherId, documentId);
+    public String subjectIdOf(String documentId) {
+        return documents.subjectIdOf(documentId);
     }
 
     @Transactional
-    public void delete(String teacherId, String documentId) {
-        String path = documents.storagePathOf(teacherId, documentId)
+    public void delete(String documentId) {
+        String path = documents.storagePathOf(documentId)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Document not found"));
-        documents.deleteWithChunks(teacherId, documentId);
+        documents.deleteWithChunks(documentId);
         delete(Path.of(path));
     }
 
     @Transactional
-    public DocumentItem updateTopic(String teacherId, String documentId, String topic) {
+    public DocumentItem updateTopic(String documentId, String topic) {
         if (topic == null || topic.isBlank()) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "Topic is required");
         }
-        if (!documents.updateTopic(teacherId, documentId, topic.trim())) {
+        if (!documents.updateTopic(documentId, topic.trim())) {
             throw new ApiException(HttpStatus.NOT_FOUND, "Document not found");
         }
-        return document(teacherId, documentId);
+        return document(documentId);
     }
 
-    public List<DocumentItem> list(String teacherId, String subjectId) {
-        return documents.list(teacherId, subjectId);
+    public List<DocumentItem> list(String subjectId) {
+        return documents.list(subjectId);
     }
 
-    public DocumentItem document(String teacherId, String documentId) {
-        return documents.find(teacherId, documentId)
+    public DocumentItem document(String documentId) {
+        return documents.find(documentId)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Document not found"));
     }
 
     /** The first extracted chunks, so the teacher can check what the AI will read. */
-    public DocumentPreview preview(String teacherId, String documentId) {
-        DocumentItem document = document(teacherId, documentId);
+    public DocumentPreview preview(String documentId) {
+        DocumentItem document = document(documentId);
         List<PreviewChunk> chunks = documents.firstChunks(documentId, PREVIEW_CHUNKS).stream()
                 .map(chunk -> {
                     boolean truncated = chunk.content().length() > PREVIEW_CHARS;
@@ -275,12 +275,12 @@ public class DocumentIngestionService {
         return new DocumentPreview(document, chunks);
     }
 
-    public List<VivaQuestionGenerator.Passage> retrieve(String teacherId, String subjectId, String topic, int limit) {
-        String literal = VectorLiteral.format(embeddings.embed(topic));
-        return documents.nearestForTeacher(teacherId, subjectId, literal, limit);
+    /** Course materials for question drafting. Any assigned teacher can use files on the subject. */
+    public List<VivaQuestionGenerator.Passage> retrieve(String subjectId, String topic, int limit) {
+        return retrieveForCourse(subjectId, topic, limit);
     }
 
-    /** Course materials for the viva grader, without restricting to one uploader. */
+    /** Course materials for the viva grader. */
     public List<VivaQuestionGenerator.Passage> retrieveForCourse(String courseId, String query, int limit) {
         if (courseId == null || courseId.isBlank() || query == null || query.isBlank() || limit <= 0) {
             return List.of();

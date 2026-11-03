@@ -77,7 +77,7 @@ public class TeachingService {
 
     public List<DocumentItem> documents(PublicUser teacher, String subjectId) {
         requireSubject(teacher.id(), subjectId);
-        return ingestion.list(teacher.id(), subjectId);
+        return ingestion.list(subjectId);
     }
 
     /** Stores the file and queues it for processing; poll {@link #document} for the result. */
@@ -88,26 +88,26 @@ public class TeachingService {
 
     public DocumentItem document(PublicUser teacher, String documentId) {
         requireDocument(teacher, documentId);
-        return ingestion.document(teacher.id(), documentId);
+        return ingestion.document(documentId);
     }
 
     public DocumentPreview previewDocument(PublicUser teacher, String documentId) {
         requireDocument(teacher, documentId);
-        return ingestion.preview(teacher.id(), documentId);
+        return ingestion.preview(documentId);
     }
 
     public DocumentItem updateDocumentTopic(PublicUser teacher, String documentId, String topic) {
         requireDocument(teacher, documentId);
-        return ingestion.updateTopic(teacher.id(), documentId, topic);
+        return ingestion.updateTopic(documentId, topic);
     }
 
     public void deleteDocument(PublicUser teacher, String documentId) {
         requireDocument(teacher, documentId);
-        ingestion.delete(teacher.id(), documentId);
+        ingestion.delete(documentId);
     }
 
     private void requireDocument(PublicUser teacher, String documentId) {
-        String subjectId = ingestion.subjectIdOf(teacher.id(), documentId);
+        String subjectId = ingestion.subjectIdOf(documentId);
         if (subjectId == null) {
             throw new ApiException(HttpStatus.NOT_FOUND, "Document not found");
         }
@@ -254,7 +254,6 @@ public class TeachingService {
         requireBloom(bloom);
         int bounded = Math.max(1, Math.min(count, 10));
         List<VivaQuestionGenerator.Passage> passages = ingestion.retrieve(
-                teacher.id(),
                 subjectId,
                 topic,
                 Math.max(bounded * 2, 6)
