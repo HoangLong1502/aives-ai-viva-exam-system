@@ -46,11 +46,16 @@ export function MaterialLibrary({
   subjectId,
   refreshKey,
   onChange,
+  selectedId,
+  onSelect,
 }: {
   subjectId: string;
   /** Bump to reload, e.g. after an upload. */
   refreshKey: number;
   onChange?: (materials: Material[]) => void;
+  /** The one Ready file chosen for AI drafting. */
+  selectedId?: string;
+  onSelect?: (id: string) => void;
 }) {
   const { t } = useLocale();
   const [materials, setMaterials] = useState<Material[]>([]);
@@ -58,21 +63,31 @@ export function MaterialLibrary({
   const [previews, setPreviews] = useState<Record<string, Preview | "loading">>({});
   const [editing, setEditing] = useState<{ id: string; topic: string } | null>(null);
 
-  const load = useCallback(async () => {
-    const next = await api<Material[]>(`/api/teaching/documents?subjectId=${subjectId}`, { auth: true });
-    setMaterials(next);
-    setLoaded(true);
-    onChange?.(next);
-    return next;
-  }, [subjectId, onChange]);
+  const fetchMaterials = useCallback(
+    () => api<Material[]>(`/api/teaching/documents?subjectId=${subjectId}`, { auth: true }),
+    [subjectId],
+  );
+
+  const applyMaterials = useCallback(
+    (next: Material[]) => {
+      setMaterials(next);
+      setLoaded(true);
+      onChange?.(next);
+    },
+    [onChange],
+  );
 
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    setMaterials([]);
+    setLoaded(false);
     async function tick() {
       try {
-        const next = await load();
-        if (!cancelled && next.some(isWorking)) timer = setTimeout(tick, POLL_MS);
+        const next = await fetchMaterials();
+        if (cancelled) return;
+        applyMaterials(next);
+        if (next.some(isWorking)) timer = setTimeout(tick, POLL_MS);
       } catch (error) {
         if (!cancelled) toast.error(error instanceof ApiError ? error.message : t("teacher.bank.loadError"));
       }
@@ -82,7 +97,7 @@ export function MaterialLibrary({
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [load, refreshKey, t]);
+  }, [fetchMaterials, applyMaterials, refreshKey, t]);
 
   async function togglePreview(material: Material) {
     if (previews[material.id]) {
@@ -108,7 +123,7 @@ export function MaterialLibrary({
         body: { topic: editing.topic.trim() },
       });
       setEditing(null);
-      await load();
+      applyMaterials(await fetchMaterials());
     } catch (error) {
       toast.error(error instanceof ApiError ? error.message : t("teacher.bank.loadError"));
     }
@@ -119,7 +134,7 @@ export function MaterialLibrary({
     try {
       await api(`/api/teaching/documents/${material.id}`, { method: "DELETE", auth: true });
       toast.success(t("teacher.bank.materialDeleted"));
-      await load();
+      applyMaterials(await fetchMaterials());
     } catch (error) {
       toast.error(error instanceof ApiError ? error.message : t("teacher.bank.loadError"));
     }
@@ -137,8 +152,22 @@ export function MaterialLibrary({
         {materials.map((material) => {
           const preview = previews[material.id];
           return (
-            <li key={material.id} className="space-y-2 p-3">
-              <div className="flex flex-wrap items-start justify-between gap-2">
+            <li
+              key={material.id}
+              className={cn("space-y-2 p-3", onSelect && selectedId === material.id && "bg-primary/5")}
+            >
+              <div className="flex items-start gap-3">
+                {onSelect ? (
+                  <input
+                    type="radio"
+                    name={`draft-file-${subjectId}`}
+                    className="mt-1 size-4 shrink-0 accent-primary disabled:opacity-40"
+                    checked={selectedId === material.id}
+                    disabled={material.status !== "DONE"}
+                    onChange={() => onSelect(material.id)}
+                    aria-label={material.name}
+                  />
+                ) : null}
                 <div className="min-w-0 flex-1 space-y-1">
                   <p className="truncate text-sm font-medium">{material.name}</p>
                   {editing?.id === material.id ? (
@@ -175,7 +204,7 @@ export function MaterialLibrary({
                     </p>
                   )}
                 </div>
-                <div className="flex items-center gap-1">
+                <div className="flex shrink-0 items-center gap-1">
                   <StatusBadge status={material.status} />
                   <Button
                     type="button"
