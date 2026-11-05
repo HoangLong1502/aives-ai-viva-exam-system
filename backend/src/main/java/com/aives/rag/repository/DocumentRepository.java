@@ -248,6 +248,40 @@ public class DocumentRepository {
         );
     }
 
+    public List<VivaQuestionGenerator.Passage> nearestForDocuments(
+            String courseId,
+            List<String> documentIds,
+            String vectorLiteral,
+            int limit
+    ) {
+        StringBuilder placeholders = new StringBuilder();
+        Object[] args = new Object[documentIds.size() + 3];
+        args[0] = courseId;
+        for (int i = 0; i < documentIds.size(); i++) {
+            if (i > 0) {
+                placeholders.append(", ");
+            }
+            placeholders.append("?::uuid");
+            args[i + 1] = documentIds.get(i);
+        }
+        args[args.length - 2] = vectorLiteral;
+        args[args.length - 1] = limit;
+        return jdbc.query(
+                """
+                SELECT c.title, c.source_label, c.content
+                FROM knowledge_chunk c
+                JOIN course_document d ON d.id = c.document_id
+                WHERE d.course_id = ?::uuid
+                  AND d.extraction_status = 'DONE'
+                  AND d.id IN (%s)
+                ORDER BY c.embedding <=> ?::vector
+                LIMIT ?
+                """.formatted(placeholders),
+                (rs, row) -> passage(rs),
+                args
+        );
+    }
+
     private static VivaQuestionGenerator.Passage passage(ResultSet rs) throws SQLException {
         return new VivaQuestionGenerator.Passage(
                 rs.getString("title") + ", " + rs.getString("source_label"),

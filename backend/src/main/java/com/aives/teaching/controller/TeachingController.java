@@ -213,7 +213,8 @@ public class TeachingController {
                 request.topic(),
                 request.bloom(),
                 request.rubricId(),
-                request.count()
+                request.count(),
+                request.documentIds()
         );
     }
 
@@ -337,7 +338,8 @@ public class TeachingController {
             @NotBlank String topic,
             @NotBlank String bloom,
             @NotBlank String rubricId,
-            @Min(1) @Max(10) int count
+            @Min(1) @Max(10) int count,
+            List<String> documentIds
     ) {
     }
 
