@@ -23,6 +23,7 @@ import {
   detectSpeechLang,
   normalizeEnVoice,
   normalizeViVoice,
+  armExamPrefetch,
   cancelExamPrefetch,
   playTTS,
   prefetchExamLines,
@@ -74,12 +75,23 @@ type EvaluationItem = {
 type Phase = "countdown" | "speaking" | "ready" | "listening" | "evaluating" | "choose" | "done";
 
 type TurnRecord = {
+  turnId: string;
   questionId: string;
   turnNo: number;
   turnType: "MAIN" | "FOLLOW_UP";
   questionText: string;
   transcript: string;
   feedback: string;
+  needsFollowUp?: boolean;
+  followUpReason?: string | null;
+  followUpQuestion?: string | null;
+};
+
+type Opening = {
+  text: string;
+  after: "listen" | "choose";
+  parentTurnId: string;
+  followUp: string | null;
 };
 
 type Bubble = {
@@ -156,6 +168,53 @@ function examLine(prompt: string, key: string) {
   return translate(detectSpeechLang(prompt) === "en-US" ? "en" : "vi", key);
 }
 
+/**
+ * A question is finished only when its latest turn does not still expect an answer.
+ * Leaving during a follow-up must resume that question, not the next one.
+ */
+function resumePlan(questions: Question[], turns: TurnRecord[]): {
+  index: number;
+  doneIds: string[];
+  opening: Opening | null;
+} {
+  const grouped = new Map<string, TurnRecord[]>();
+  for (const turn of turns) {
+    const list = grouped.get(turn.questionId) ?? [];
+    list.push(turn);
+    grouped.set(turn.questionId, list);
+  }
+  for (let index = 0; index < questions.length; index += 1) {
+    const question = questions[index];
+    const own = (grouped.get(question.id) ?? []).sort((a, b) => a.turnNo - b.turnNo);
+    const doneIds = questions.slice(0, index).map((item) => item.id);
+    if (own.length === 0) return { index, doneIds, opening: null };
+    const latest = own[own.length - 1];
+    const pending = latest.followUpQuestion?.trim() ?? "";
+    if (latest.needsFollowUp) {
+      const text = pending || latest.questionText.trim() || question.prompt;
+      return {
+        index,
+        doneIds,
+        opening: { text, after: "listen", parentTurnId: latest.turnId, followUp: text },
+      };
+    }
+    if ((latest.followUpReason ?? "").trim() === "STUDENT_STUCK") {
+      return {
+        index,
+        doneIds,
+        opening: {
+          text: examLine(question.prompt, "student.tests.choosePrompt"),
+          after: "choose",
+          parentTurnId: latest.turnId,
+          followUp: null,
+        },
+      };
+    }
+  }
+  const index = Math.max(0, questions.length - 1);
+  return { index, doneIds: questions.map((item) => item.id), opening: null };
+}
+
 function speakLine(text: string, viVoice: string, enVoice: string) {
   return new Promise<void>((resolve) => {
     let settled = false;
@@ -194,6 +253,7 @@ export function StudentTests() {
   const [answeredIds, setAnsweredIds] = useState<string[]>([]);
   const [turnHistory, setTurnHistory] = useState<TurnRecord[]>([]);
   const [startIndex, setStartIndex] = useState(0);
+  const [opening, setOpening] = useState<Opening | null>(null);
 
   function load() {
     api<Session[]>("/api/student/exams", { auth: true })
@@ -218,11 +278,11 @@ export function StudentTests() {
       const fresh = await api<Session[]>("/api/student/exams", { auth: true });
       // Resume where the student left off: questions they already answered are not asked again.
       const turns = await api<TurnRecord[]>(`/api/student/exams/${session.id}/turns`, { auth: true });
-      const answered = new Set(turns.map((turn) => turn.questionId));
-      const firstOpen = next.findIndex((question) => !answered.has(question.id));
-      setAnsweredIds([...answered]);
+      const plan = resumePlan(next, turns);
+      setAnsweredIds(plan.doneIds);
       setTurnHistory(turns);
-      setStartIndex(firstOpen === -1 ? Math.max(0, next.length - 1) : firstOpen);
+      setStartIndex(plan.index);
+      setOpening(plan.opening);
       setActiveSession(fresh.find((item) => item.id === session.id) ?? session);
       setQuestions(next);
       load();
@@ -250,6 +310,7 @@ export function StudentTests() {
           answeredIds={answeredIds}
           turns={turnHistory}
           initialIndex={startIndex}
+          opening={opening}
           onClose={() => {
             stopTTS();
             setActiveSession(null);
@@ -321,6 +382,7 @@ function VivaExamRoom({
   answeredIds,
   turns,
   initialIndex,
+  opening,
   onClose,
   onComplete,
 }: {
@@ -329,6 +391,7 @@ function VivaExamRoom({
   answeredIds: string[];
   turns: TurnRecord[];
   initialIndex: number;
+  opening: Opening | null;
   onClose: () => void;
   onComplete: () => void;
 }) {
@@ -342,8 +405,19 @@ function VivaExamRoom({
   const [submittingExam, setSubmittingExam] = useState(false);
   const [phase, setPhase] = useState<Phase>("countdown");
   const [countdown, setCountdown] = useState(COUNTDOWN_START);
-  const [followUpPrompt, setFollowUpPrompt] = useState<string | null>(null);
-  const [bubbleMap, setBubbleMap] = useState<Record<string, Bubble[]>>(() => buildHistory(questions, turns));
+  const [followUpPrompt, setFollowUpPrompt] = useState<string | null>(opening?.followUp ?? null);
+  const [bubbleMap, setBubbleMap] = useState<Record<string, Bubble[]>>(() => {
+    const history = buildHistory(questions, turns);
+    const question = questions[initialIndex];
+    if (opening && question) {
+      const list = history[question.id] ?? [];
+      const last = list[list.length - 1];
+      if (!last || last.role !== "examiner" || last.text !== opening.text) {
+        history[question.id] = [...list, bubble("examiner", opening.text, "resume-opening")];
+      }
+    }
+    return history;
+  });
   const [trackedIndex, setTrackedIndex] = useState(initialIndex);
   const [deadline] = useState<number | null>(() =>
     session.remainingSeconds != null
@@ -382,8 +456,8 @@ function VivaExamRoom({
   const voiceRef = useRef(activeVoice);
   const enVoiceRef = useRef(activeEnVoice);
   const transcriptRef = useRef(transcript);
-  const followUpRef = useRef<string | null>(followUpPrompt);
-  const parentTurnRef = useRef<string | null>(null);
+  const followUpRef = useRef<string | null>(opening?.followUp ?? null);
+  const parentTurnRef = useRef<string | null>(opening?.parentTurnId ?? null);
   const submittingRef = useRef(false);
   const finishingRef = useRef(false);
   const mountedRef = useRef(true);
@@ -494,6 +568,7 @@ function VivaExamRoom({
       immediate,
       onStart: () => {
         if (run !== runRef.current) return;
+        armExamPrefetch();
         if (markIndex != null) countdownSpokenRef.current = markIndex;
         window.clearTimeout(timer);
         timer = window.setTimeout(begin, Math.max(60_000, 20_000 + words * 800));
@@ -518,15 +593,17 @@ function VivaExamRoom({
 
   useEffect(() => {
     if (!voiceReady || questions.length === 0) return;
-    const ordered = [
-      questions[currentIndex],
-      ...questions.filter((_, index) => index !== currentIndex),
-    ].filter((question) => question != null);
-    prefetchExamLines(ordered.map((question) => ({
-      text: question.prompt,
-      voice: voiceForSpeech(detectSpeechLang(question.prompt), activeVoice, activeEnVoice),
-    })));
-  }, [voiceReady, questions, activeVoice, activeEnVoice, currentIndex]);
+    const voiceFor = (text: string) =>
+      voiceForSpeech(detectSpeechLang(text), activeVoice, activeEnVoice);
+    const lines: { text: string; voice: string }[] = [];
+    if (opening && currentIndex === initialIndex) {
+      lines.push({ text: opening.text, voice: voiceFor(opening.text) });
+    }
+    for (const question of questions.slice(currentIndex)) {
+      lines.push({ text: question.prompt, voice: voiceFor(question.prompt) });
+    }
+    prefetchExamLines(lines);
+  }, [voiceReady, questions, activeVoice, activeEnVoice, currentIndex, opening, initialIndex]);
 
   useEffect(() => {
     let cancelled = false;
@@ -546,9 +623,10 @@ function VivaExamRoom({
   }, []);
 
   useEffect(() => {
+    const cue = currentIndex === initialIndex ? opening : null;
     runRef.current += 1;
-    parentTurnRef.current = null;
-    followUpRef.current = null;
+    parentTurnRef.current = cue?.parentTurnId ?? null;
+    followUpRef.current = cue?.followUp ?? null;
     submittingRef.current = false;
     countdownSpokenRef.current = null;
     answerStartedRef.current = 0;
@@ -561,7 +639,7 @@ function VivaExamRoom({
       stopTTS();
       stopListening();
     };
-  }, [currentIndex, stopListening, resetTranscript]);
+  }, [currentIndex, initialIndex, opening, stopListening, resetTranscript]);
 
   useEffect(() => {
     if (phase !== "countdown" || !voiceReady) return;
@@ -571,8 +649,10 @@ function VivaExamRoom({
     }
     const question = questions[currentIndex];
     if (!question || countdownSpokenRef.current === currentIndex) return;
-    speakThenListenRef.current(question.prompt, "listen", false, currentIndex);
-  }, [phase, countdown, currentIndex, questions, voiceReady]);
+    countdownSpokenRef.current = currentIndex;
+    const cue = currentIndex === initialIndex ? opening : null;
+    speakThenListenRef.current(cue?.text ?? question.prompt, cue?.after ?? "listen", false, currentIndex);
+  }, [phase, countdown, currentIndex, questions, voiceReady, opening, initialIndex]);
 
   useEffect(() => {
     dialogueRef.current?.scrollTo({ top: dialogueRef.current.scrollHeight });

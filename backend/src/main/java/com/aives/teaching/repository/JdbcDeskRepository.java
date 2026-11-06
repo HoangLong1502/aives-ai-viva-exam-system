@@ -829,7 +829,8 @@ public class JdbcDeskRepository {
                 SELECT qt.id::text, qt.question_id::text, qt.parent_turn_id::text,
                        qt.turn_no, qt.turn_type, qt.question_text,
                        COALESCE(ans.transcript, ''), COALESCE(ans.needs_follow_up, false),
-                       COALESCE(ans.follow_up_reason, ''), COALESCE(ans.feedback, '')
+                       COALESCE(ans.follow_up_reason, ''), COALESCE(ans.feedback, ''),
+                       COALESCE(ans.follow_up_question, '')
                 FROM question_turn qt
                 LEFT JOIN answer ans ON ans.turn_id = qt.id
                 WHERE qt.attempt_id = ?::uuid
@@ -845,7 +846,8 @@ public class JdbcDeskRepository {
                         rs.getString(7),
                         rs.getBoolean(8),
                         rs.getString(9),
-                        rs.getString(10)
+                        rs.getString(10),
+                        rs.getString(11)
                 ),
                 attemptId
         );
