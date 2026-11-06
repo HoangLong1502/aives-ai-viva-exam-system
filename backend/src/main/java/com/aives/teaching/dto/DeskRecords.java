@@ -174,7 +174,9 @@ public final class DeskRecords {
             String transcript,
             boolean needsFollowUp,
             String followUpReason,
-            String feedback
+            String feedback,
+            /** The follow-up the examiner asked and the student has not answered yet, or blank. */
+            String followUpQuestion
     ) {
     }
 

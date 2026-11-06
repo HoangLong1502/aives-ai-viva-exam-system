@@ -248,6 +248,8 @@ function enqueueClip(voice: string, text: string, front: boolean): Promise<Blob>
 }
 
 let speakTail: Promise<void> = Promise.resolve();
+/** Later questions wait until the line being read has actually started. */
+let nextArmed = false;
 
 /** Only one /speak may run. A second request makes the server cut the first utterance short. */
 function enqueueSpeak<T>(task: () => Promise<T>): Promise<T> {
@@ -269,7 +271,7 @@ async function downloadClip(voice: string, text: string, signal: AbortSignal): P
 }
 
 function releaseParked() {
-  if (parked.length === 0) return;
+  if (!nextArmed || parked.length === 0) return;
   prefetchQueue.push(...parked.splice(0, parked.length));
 }
 
@@ -375,28 +377,41 @@ function findJob(voice: string, text: string): PrefetchJob | null {
   );
 }
 
-/** Load the current question first. Later questions stay parked until that file is ready. */
+/**
+ * Load the line the student is about to hear. Later lines stay parked until
+ * {@link armExamPrefetch} — a cached current line must not be skipped in favour
+ * of synthesising the next question.
+ */
 export function prefetchExamLines(lines: { text: string; voice: string }[]) {
+  nextArmed = false;
   const jobs: PrefetchJob[] = [];
   const seen = new Set<string>();
-  let currentLoading = false;
+  let sawHead = false;
+  let headReady = false;
+  let headLoading = false;
   for (const line of lines) {
     const text = line.text.trim();
     if (!text || !isZeroTtsVoice(line.voice)) continue;
     const key = clipKey(line.voice, text);
     if (seen.has(key)) continue;
     seen.add(key);
+    const isHead = !sawHead;
+    sawHead = true;
     const clip = preparedClips.get(key);
+    if (isHead && clip?.status === "ready") {
+      headReady = true;
+      continue;
+    }
     if (clip?.status === "ready") continue;
     if (clip?.status === "loading") {
-      if (jobs.length === 0) currentLoading = true;
+      if (isHead) headLoading = true;
       continue;
     }
     jobs.push(findJob(line.voice, text) ?? createJob(line.voice, text));
   }
   prefetchQueue.length = 0;
   parked.length = 0;
-  if (currentLoading) {
+  if (headLoading || headReady) {
     parked.push(...jobs);
     return;
   }
@@ -406,8 +421,16 @@ export function prefetchExamLines(lines: { text: string; voice: string }[]) {
   void runPrefetch();
 }
 
+/** The current line is playing, so the following questions may load in the background. */
+export function armExamPrefetch() {
+  nextArmed = true;
+  releaseParked();
+  void runPrefetch();
+}
+
 /** Stop background preparation when the student leaves the exam. Ready clips stay cached. */
 export function cancelExamPrefetch() {
+  nextArmed = false;
   const pending = prefetchQueue.splice(0, prefetchQueue.length);
   pending.push(...parked.splice(0, parked.length));
   for (const job of pending) job.reject(new DOMException("Aborted", "AbortError"));
@@ -648,7 +671,8 @@ function replyPieces(text: string): string[] {
   for (const piece of pieces) {
     const prev = merged[merged.length - 1];
     const count = piece.split(/\s+/).length;
-    if (prev && count < 3 && prev.split(/\s+/).length + count <= 14) {
+    // A one-word tail such as "văn." is the end of the previous sentence, not a new utterance.
+    if (prev && count < 4) {
       merged[merged.length - 1] = `${prev} ${piece}`;
     } else {
       merged.push(piece);
@@ -662,24 +686,42 @@ async function downloadSentence(voice: string, text: string, signal: AbortSignal
   const existing = preparedClips.get(key);
   if (existing?.status === "ready" && existing.blob) return existing.blob;
   if (existing?.status === "loading") return existing.promise;
-  const blob = await enqueueSpeak(async () => {
-    if (signal.aborted) throw new DOMException("Aborted", "AbortError");
-    const response = await fetch(speakUrl(voice, text), { signal });
+
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  if (signal.aborted) controller.abort();
+  else signal.addEventListener("abort", abort, { once: true });
+  const promise = enqueueSpeak(async () => {
+    if (controller.signal.aborted) throw new DOMException("Aborted", "AbortError");
+    const response = await fetch(speakUrl(voice, text), { signal: controller.signal });
     if (!response.ok) throw new Error(`ZeroTTS ${response.status}`);
     const bytes = new Uint8Array(await response.arrayBuffer());
-    if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+    if (controller.signal.aborted) throw new DOMException("Aborted", "AbortError");
     assertAudible(bytes, text);
     return wavBlob([bytes]);
   });
-  preparedClips.set(key, {
-    status: "ready",
+  const clip: PreparedClip = {
+    status: "loading",
     voice,
     text,
-    blob,
-    promise: Promise.resolve(blob),
-    controller: new AbortController(),
-  });
-  return blob;
+    promise,
+    controller,
+  };
+  preparedClips.set(key, clip);
+  try {
+    const blob = await promise;
+    if (preparedClips.get(key)?.controller === controller) {
+      clip.blob = blob;
+      clip.status = "ready";
+      clip.promise = Promise.resolve(blob);
+    }
+    return blob;
+  } catch (error) {
+    if (preparedClips.get(key)?.controller === controller) preparedClips.delete(key);
+    throw error;
+  } finally {
+    signal.removeEventListener("abort", abort);
+  }
 }
 
 /** Load one short sentence completely, play it in one piece, and prepare the next sentence while it plays. */
@@ -752,6 +794,38 @@ export function primeTTS(): void {
   void ctx.resume().catch(() => {});
 }
 
+/** Silence at the front so the output device can wake without eating the first words. */
+const LEAD_IN_SEC = 0.18;
+
+function withLeadIn(ctx: AudioContext, buffer: AudioBuffer): AudioBuffer {
+  const lead = Math.floor(buffer.sampleRate * LEAD_IN_SEC);
+  if (lead <= 0) return buffer;
+  const out = ctx.createBuffer(buffer.numberOfChannels, buffer.length + lead, buffer.sampleRate);
+  for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
+    out.getChannelData(channel).set(buffer.getChannelData(channel), lead);
+  }
+  return out;
+}
+
+function wavWithLeadIn(wav: Uint8Array): Uint8Array {
+  if (wav.byteLength < 44) return wav;
+  const view = new DataView(wav.buffer, wav.byteOffset, wav.byteLength);
+  const rate = view.getUint32(24, true);
+  const channels = view.getUint16(22, true) || 1;
+  const bits = view.getUint16(34, true) || 16;
+  const bytesPerSample = Math.max(1, bits / 8);
+  const leadBytes = Math.floor(rate * LEAD_IN_SEC) * channels * bytesPerSample;
+  if (!rate || leadBytes <= 0) return wav;
+  const out = new Uint8Array(wav.byteLength + leadBytes);
+  out.set(wav.subarray(0, 44), 0);
+  out.set(wav.subarray(44), 44 + leadBytes);
+  const dataSize = out.byteLength - 44;
+  const outView = new DataView(out.buffer);
+  outView.setUint32(4, 36 + dataSize, true);
+  outView.setUint32(40, dataSize, true);
+  return out;
+}
+
 /** Play one saved recording at its original speed. */
 async function playCompleteWav(
   wav: Uint8Array,
@@ -771,10 +845,11 @@ async function playCompleteWav(
   const copy = wav.buffer.slice(wav.byteOffset, wav.byteOffset + wav.byteLength);
   const decoded = await ctx.decodeAudioData(copy as ArrayBuffer);
   if (signal.aborted) return;
+  const buffer = withLeadIn(ctx, decoded);
   await new Promise<void>((resolve, reject) => {
     const source = ctx.createBufferSource();
     activeSource = source;
-    source.buffer = decoded;
+    source.buffer = buffer;
     source.connect(ctx.destination);
     const finish = () => {
       if (activeSource === source) activeSource = null;
@@ -793,7 +868,9 @@ async function playCompleteWav(
       finish();
     }, { once: true });
     try {
-      source.start();
+      // start() with no time is start(0). Once the context clock has moved, that
+      // offset skips the beginning of the buffer.
+      source.start(ctx.currentTime + 0.05);
       hooks.onStart?.();
     } catch (error) {
       finish();
@@ -820,7 +897,7 @@ function playBufferedWav(
     view.setUint32(4, 36 + dataSize, true);
     view.setUint32(40, dataSize, true);
   }
-  const url = URL.createObjectURL(new Blob([wav], { type: "audio/wav" }));
+  const url = URL.createObjectURL(new Blob([wavWithLeadIn(wav)], { type: "audio/wav" }));
   const audio = new Audio(url);
   currentAudio = audio;
   return new Promise((resolve, reject) => {

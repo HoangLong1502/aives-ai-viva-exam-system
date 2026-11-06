@@ -132,7 +132,7 @@ class VivaEvaluationServiceTest {
     }
 
     private static VivaTurnItem turn(String id, int no, String type, String text) {
-        return new VivaTurnItem(id, Q1, null, no, type, text, "a", false, "", "");
+        return new VivaTurnItem(id, Q1, null, no, type, text, "a", false, "", "", "");
     }
 
     private static QuestionItem question() {
