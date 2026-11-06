@@ -24,8 +24,8 @@ export function AdminSettings() {
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
 
-  // Load the subject list, examiner list, and speech config from the backend so the
-  // admin can manage the current settings in one place.
+  // Tải danh sách môn học, giám khảo và cấu hình giọng nói để quản trị viên
+  // có thể quản lý các thiết lập tại cùng một nơi.
   function load() {
     Promise.all([
       api<Subject[]>("/api/admin/subjects", { auth: true }),
@@ -51,8 +51,7 @@ export function AdminSettings() {
     load();
   }, []);
 
-  // Create a new subject and immediately refresh the list so the admin sees it without
-  // leaving the page.
+  // Tạo môn học mới rồi tải lại danh sách để cập nhật giao diện ngay tại trang này.
   async function createSubject(event: FormEvent) {
     event.preventDefault();
     try {
@@ -65,7 +64,7 @@ export function AdminSettings() {
     }
   }
 
-  // Bind a teacher to a subject so the teacher can view only the assigned curriculum.
+  // Gán giám khảo vào môn học để họ chỉ xem được nội dung môn học được phân công.
   async function assign(subjectId: string, teacherId: string) {
     if (!teacherId) return;
     try {
@@ -81,8 +80,8 @@ export function AdminSettings() {
     }
   }
 
-  // Persist STT/TTS choices for the exam system so speech recognition and voice output
-  // follow the admin-selected languages and voices.
+  // Lưu lựa chọn STT/TTS để hệ thống nhận diện và phát giọng nói theo ngôn ngữ,
+  // giọng đọc mà quản trị viên đã chọn.
   async function saveSpeech(event: FormEvent) {
     event.preventDefault();
     try {
@@ -100,7 +99,7 @@ export function AdminSettings() {
 
   return (
     <div className="space-y-8">
-      {/* This top section acts as the page heading for the admin settings area. */}
+      {/* Phần đầu trang hiển thị tiêu đề và giới thiệu các thiết lập quản trị. */}
       <section className="space-y-2">
         <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Settings</p>
         <h1 className="font-serif text-4xl tracking-tight">Subjects and speech</h1>
@@ -109,8 +108,7 @@ export function AdminSettings() {
         </p>
       </section>
 
-      {/* Subject management is the main admin responsibility here: each subject can be
-      created and linked to the relevant examiner(s). */}
+      {/* Khu vực quản lý môn học cho phép tạo môn mới và gán giám khảo phù hợp. */}
       <Card>
         <CardHeader className="border-b">
           <CardTitle className="font-serif text-2xl">Subjects</CardTitle>
@@ -145,15 +143,15 @@ export function AdminSettings() {
         </CardContent>
       </Card>
 
-      {/* Speech settings control how the viva system listens and speaks during interviews. */}
+      {/* Các thiết lập giọng nói quyết định cách hệ thống nghe và phản hồi trong buổi vấn đáp. */}
       <Card>
         <CardHeader className="border-b">
           <CardTitle className="font-serif text-2xl">STT and TTS</CardTitle>
           <CardDescription>Used when a viva listens and speaks.</CardDescription>
         </CardHeader>
         <CardContent>
-          {/* Audio configuration is applied to the viva flow itself, so the selected
-          languages and voices must be saved before interviews begin. */}
+          {/* Cấu hình âm thanh được dùng trong quy trình vấn đáp; cần lưu ngôn ngữ
+          và giọng đọc đã chọn trước khi bắt đầu buổi thi. */}
           <form className="grid gap-3 sm:grid-cols-2" onSubmit={saveSpeech}>
             <label className="space-y-1 text-sm">
               <span>Speech to text</span>
@@ -162,7 +160,7 @@ export function AdminSettings() {
                 <option value="en">English</option>
               </select>
             </label>
-            {/* TTS language chooses the default output language for the AI voice. */}
+            {/* Chọn ngôn ngữ mặc định mà giọng nói AI sẽ sử dụng khi phản hồi. */}
             <label className="space-y-1 text-sm">
               <span>Text to speech</span>
               <select className="h-9 w-full rounded-lg border border-input bg-background px-2" value={speech.ttsLanguage} onChange={(event) => setSpeech((current) => ({ ...current, ttsLanguage: event.target.value }))}>
@@ -170,8 +168,8 @@ export function AdminSettings() {
                 <option value="en">English</option>
               </select>
             </label>
-            {/* ZeroTTS voices are used for Vietnamese output, while the English voice list
-            is configured separately for international interviews. */}
+            {/* Giọng ZeroTTS dùng cho tiếng Việt; danh sách giọng tiếng Anh được
+            cấu hình riêng để phục vụ các buổi vấn đáp bằng tiếng Anh. */}
             <label className="space-y-1 text-sm">
               <span>Vietnamese voice (ZeroTTS)</span>
               <select className="h-9 w-full rounded-lg border border-input bg-background px-2" value={speech.ttsVoice} onChange={(event) => setSpeech((current) => ({ ...current, ttsVoice: event.target.value }))}>
