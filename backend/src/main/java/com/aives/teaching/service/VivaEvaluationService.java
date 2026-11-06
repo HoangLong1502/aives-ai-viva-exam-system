@@ -1,5 +1,6 @@
 package com.aives.teaching.service;
 
+import com.aives.ai.SpokenLanguage;
 import com.aives.teaching.grading.AttemptScoring;
 import com.aives.teaching.grading.Grade;
 import com.aives.teaching.grading.GradingPrompt;
@@ -306,7 +307,7 @@ public class VivaEvaluationService {
             String examinerJustAsked
     ) {
         String cleanAnswer = studentAnswer == null ? "" : studentAnswer.trim();
-        String language = detectPromptLanguage(question.prompt());
+        String language = SpokenLanguage.of(question.prompt());
         List<String> materials = courseMaterials(question);
         List<RubricCriterionItem> criteria = rubricCriteria(question);
 
@@ -445,19 +446,4 @@ public class VivaEvaluationService {
         );
     }
 
-    private static String detectPromptLanguage(String prompt) {
-        if (prompt == null || prompt.isBlank()) {
-            return "Vietnamese";
-        }
-        // Vietnamese diacritics → Vietnamese; otherwise treat Latin-only as English
-        if (prompt.matches("(?s).*[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđÀÁẠẢÃÂẦẤẬẨẪĂẰẮẶẲẴÈÉẸẺẼÊỀẾỆỂỄÌÍỊỈĨÒÓỌỎÕÔỒỐỘỔỖƠỜỚỢỞỠÙÚỤỦŨƯỪỨỰỬỮỲÝỴỶỸĐ].*")) {
-            return "Vietnamese";
-        }
-        long letters = prompt.chars().filter(Character::isLetter).count();
-        long ascii = prompt.chars().filter(c -> (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')).count();
-        if (letters > 0 && (double) ascii / letters >= 0.85) {
-            return "English";
-        }
-        return "Vietnamese";
-    }
 }

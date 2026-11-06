@@ -2,6 +2,7 @@ package com.aives.rag.service;
 
 import com.aives.rag.parser.GeneratedQuestionParser;
 import com.aives.ai.Difficulty;
+import com.aives.ai.SpokenLanguage;
 import com.aives.config.AppProperties;
 import com.aives.rag.parser.GeneratedQuestionParser.Draft;
 import com.aives.web.ApiException;
@@ -116,14 +117,17 @@ public class VivaQuestionGenerator {
                     .append(passage.text())
                     .append("\n\n");
         }
+        String language = outputLanguage(topic, passages);
         String user = """
                 Topic: %s
                 Difficulty: %s
                 Number of questions: %d
+                Output language: %s
 
                 Course passages:
                 %s
-                """.formatted(topic, Difficulty.describe(bloom), count, context);
+                Write prompt, expectedAnswer and keyPoints entirely in %s. Do not translate the question into another language.
+                """.formatted(topic, Difficulty.describe(bloom), count, language, context, language);
         return Map.of(
                 "model", properties.ai().model(),
                 "temperature", 0.2,
@@ -131,24 +135,44 @@ public class VivaQuestionGenerator {
                 // budget leaves room for that on top of roughly 600 tokens of JSON per question.
                 "max_tokens", Math.min(8192, 2048 + count * 600),
                 "messages", List.of(
-                        Map.of("role", "system", "content", """
-                                You write oral viva questions for examiners, grounded ONLY in the supplied course passages.
-                                Every question must include a model answer and key points taken from those passages so an AI grader can mark student answers later.
-                                Return JSON only, with this shape:
-                                {"questions":[{"prompt":"...","source":"filename, page 2","expectedAnswer":"...","keyPoints":"point1; point2; point3"}]}
-                                Rules:
-                                - prompt: an oral viva question a student can answer aloud.
-                                - source: name the passage you used (title and page/section label).
-                                - expectedAnswer: a concise model answer in the same language as the passages, using only facts from that passage.
-                                - keyPoints: short grading checklist separated by ';', each point must appear in the passage.
-                                - Every question must match the requested difficulty, as defined below.
-                                - Every question must stand on its own: it may be asked alone, so never refer to another question ("the same requirement", "as above").
-                                Do not invent facts that are not in the passages.
-
-                                """ + Difficulty.DEFINITIONS + "\n"),
+                        Map.of("role", "system", "content", systemPrompt(language)),
                         Map.of("role", "user", "content", user)
                 )
         );
+    }
+
+    /** The language of the slide text. The teacher topic is only used when the passages have no letters. */
+    static String outputLanguage(String topic, List<Passage> passages) {
+        StringBuilder sample = new StringBuilder();
+        if (passages != null) {
+            for (Passage passage : passages) {
+                if (passage != null && passage.text() != null) {
+                    sample.append(passage.text()).append('\n');
+                }
+            }
+        }
+        String fromPassages = sample.toString().strip();
+        return SpokenLanguage.of(fromPassages.isEmpty() ? topic : fromPassages);
+    }
+
+    static String systemPrompt(String language) {
+        return """
+                You write oral viva questions for examiners, grounded ONLY in the supplied course passages.
+                Every question must include a model answer and key points taken from those passages so an AI grader can mark student answers later.
+                Return JSON only, with this shape:
+                {"questions":[{"prompt":"...","source":"filename, page 2","expectedAnswer":"...","keyPoints":"point1; point2; point3"}]}
+                Rules:
+                - prompt: an oral viva question a student can answer aloud, written entirely in %s.
+                - source: name the passage you used (title and page/section label).
+                - expectedAnswer: a concise model answer written entirely in %s, using only facts from that passage.
+                - keyPoints: a short grading checklist written entirely in %s and separated by ';'. Each point must appear in the passage.
+                - Write prompt, expectedAnswer and keyPoints entirely in %s. Do not translate them into another language.
+                - Technical terms may stay exactly as they appear in the passages.
+                - Every question must match the requested difficulty, as defined below.
+                - Every question must stand on its own: it may be asked alone, so never refer to another question ("the same requirement", "as above").
+                Do not invent facts that are not in the passages.
+
+                """.formatted(language, language, language, language) + Difficulty.DEFINITIONS + "\n";
     }
 
     private String message(String body) {
