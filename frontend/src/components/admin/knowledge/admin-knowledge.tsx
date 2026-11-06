@@ -46,6 +46,7 @@ export function AdminKnowledge() {
     return api<Passage[]>("/api/knowledge", { auth: true, signal, cache: "no-store" });
   }, []);
 
+  // Tải tài liệu và danh sách môn học ở hai luồng riêng để mỗi phần có thể báo lỗi độc lập.
   useEffect(() => {
     const controller = new AbortController();
     loadPassages(controller.signal)

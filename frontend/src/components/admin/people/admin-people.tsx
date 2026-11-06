@@ -58,6 +58,7 @@ export function AdminPeople() {
         aria-label={copy.tabsLabel}
         className="flex w-fit gap-1 rounded-lg bg-muted p-1"
         onKeyDown={(event) => {
+          // Hỗ trợ chuyển tab bằng phím mũi tên theo cách điều hướng bàn phím tiêu chuẩn.
           if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
           event.preventDefault();
           const tabs = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')];

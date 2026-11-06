@@ -87,6 +87,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
   const pageTitle = current?.label ?? t("nav.admin.dashboard");
 
   useEffect(() => {
+    // Chặn tài khoản không có quyền quản trị trước khi hiển thị nội dung trang.
     if (user && user.role !== "ADMIN") {
       toast.error(t("errors.adminOnly"));
       router.replace("/");

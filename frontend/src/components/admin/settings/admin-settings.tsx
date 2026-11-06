@@ -145,6 +145,7 @@ export function AdminSettings() {
     if (!pending) return;
     setConfirming(true);
     try {
+      // Cùng một hộp thoại xác nhận xử lý cả gỡ phân công lẫn xóa môn học.
       if (pending.kind === "unassign") {
         await api(`/api/admin/subjects/${pending.subject.id}/teachers/${pending.teacherId}`, {
           method: "DELETE",

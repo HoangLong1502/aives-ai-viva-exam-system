@@ -32,11 +32,13 @@ export function useAdminDashboard() {
     const controller = new AbortController();
     const requestId = ++requestRef.current;
 
+    // Tải từng nhóm dữ liệu độc lập để một API lỗi không làm mất các phần còn lại.
     void Promise.allSettled([
       fetchAdminStats(controller.signal),
       fetchAdminSubjects(controller.signal),
       fetchAdminAttempts(controller.signal),
     ]).then(([statsResult, subjectsResult, attemptsResult]) => {
+      // Bỏ qua kết quả cũ nếu một lượt tải mới đã bắt đầu.
       if (requestId !== requestRef.current) return;
       setStats(settle(statsResult, parseAdminStats));
       setSubjects(settle(subjectsResult, parseAdminSubjects));
@@ -52,6 +54,7 @@ export function useAdminDashboard() {
 
   const refresh = useCallback(() => {
     setRefreshing(true);
+    // Giữ dữ liệu đã tải thành công trên màn hình trong lúc làm mới.
     setStats((current) => (current.status === "success" ? current : { status: "loading" }));
     setSubjects((current) => (current.status === "success" ? current : { status: "loading" }));
     setAttempts((current) => (current.status === "success" ? current : { status: "loading" }));

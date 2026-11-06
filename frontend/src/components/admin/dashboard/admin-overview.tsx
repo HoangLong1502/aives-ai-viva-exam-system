@@ -6,8 +6,8 @@ import { useAdminDashboard } from "@/components/admin/dashboard/use-admin-dashbo
 export function AdminOverview() {
   const { stats, subjects, attempts, refreshing, refresh } = useAdminDashboard();
 
-  // Keep the admin landing screen as a thin wrapper: fetch dashboard data and pass it
-  // to the shared presentation component. This keeps the logic reusable across views.
+  // Giữ màn hình tổng quan gọn nhẹ: lấy dữ liệu bằng hook rồi chuyển cho component
+  // trình bày dùng chung để có thể tái sử dụng giao diện ở các màn hình khác.
   return (
     <DashboardView
       stats={stats}
