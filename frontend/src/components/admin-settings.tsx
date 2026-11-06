@@ -152,6 +152,8 @@ export function AdminSettings() {
           <CardDescription>Used when a viva listens and speaks.</CardDescription>
         </CardHeader>
         <CardContent>
+          {/* Audio configuration is applied to the viva flow itself, so the selected
+          languages and voices must be saved before interviews begin. */}
           <form className="grid gap-3 sm:grid-cols-2" onSubmit={saveSpeech}>
             <label className="space-y-1 text-sm">
               <span>Speech to text</span>
@@ -160,6 +162,7 @@ export function AdminSettings() {
                 <option value="en">English</option>
               </select>
             </label>
+            {/* TTS language chooses the default output language for the AI voice. */}
             <label className="space-y-1 text-sm">
               <span>Text to speech</span>
               <select className="h-9 w-full rounded-lg border border-input bg-background px-2" value={speech.ttsLanguage} onChange={(event) => setSpeech((current) => ({ ...current, ttsLanguage: event.target.value }))}>
@@ -167,6 +170,8 @@ export function AdminSettings() {
                 <option value="en">English</option>
               </select>
             </label>
+            {/* ZeroTTS voices are used for Vietnamese output, while the English voice list
+            is configured separately for international interviews. */}
             <label className="space-y-1 text-sm">
               <span>Vietnamese voice (ZeroTTS)</span>
               <select className="h-9 w-full rounded-lg border border-input bg-background px-2" value={speech.ttsVoice} onChange={(event) => setSpeech((current) => ({ ...current, ttsVoice: event.target.value }))}>
