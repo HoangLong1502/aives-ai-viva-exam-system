@@ -51,6 +51,16 @@ public class TeachingController {
         return teaching.mySubjects(teacher);
     }
 
+    @GetMapping("/subjects/catalog")
+    public List<SubjectItem> catalog(@AuthenticationPrincipal PublicUser teacher) {
+        return teaching.catalog(teacher);
+    }
+
+    @PostMapping("/subjects/{id}/use")
+    public void useSubject(@AuthenticationPrincipal PublicUser teacher, @PathVariable String id) {
+        teaching.useSubject(teacher, id);
+    }
+
     @PostMapping("/subjects")
     public SubjectItem createSubject(
             @AuthenticationPrincipal PublicUser teacher,
