@@ -280,6 +280,21 @@ public class DocumentIngestionService {
         return retrieveForCourse(subjectId, topic, limit);
     }
 
+    /** Draft from the files the teacher picked, not every Ready file on the subject. */
+    public List<VivaQuestionGenerator.Passage> retrieveForDocuments(
+            String subjectId,
+            List<String> documentIds,
+            String topic,
+            int limit
+    ) {
+        if (subjectId == null || subjectId.isBlank() || topic == null || topic.isBlank() || limit <= 0
+                || documentIds == null || documentIds.isEmpty()) {
+            return List.of();
+        }
+        String literal = VectorLiteral.format(embeddings.embed(topic));
+        return documents.nearestForDocuments(subjectId, documentIds, literal, limit);
+    }
+
     /** Course materials for the viva grader. */
     public List<VivaQuestionGenerator.Passage> retrieveForCourse(String courseId, String query, int limit) {
         if (courseId == null || courseId.isBlank() || query == null || query.isBlank() || limit <= 0) {

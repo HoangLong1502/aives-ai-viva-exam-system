@@ -59,6 +59,24 @@ public class TeachingService {
         return desk.subjectsForTeacher(teacher.id());
     }
 
+    /** Every subject already in the bank, so a teacher can add questions to one they did not create. */
+    public List<SubjectItem> catalog(PublicUser teacher) {
+        return desk.subjects();
+    }
+
+    /** Grants this teacher the existing subject so uploads and AI drafts use the normal checks. */
+    public void useSubject(PublicUser teacher, String subjectId) {
+        try {
+            UUID.fromString(subjectId);
+        } catch (IllegalArgumentException exception) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Unknown subject");
+        }
+        if (!desk.courseExists(subjectId)) {
+            throw new ApiException(HttpStatus.NOT_FOUND, "Subject not found");
+        }
+        desk.assignTeacher(subjectId, teacher.id());
+    }
+
     public SubjectItem createSubject(PublicUser teacher, String code, String name) {
         String trimmedCode = code.trim();
         String trimmedName = name.trim();
@@ -248,20 +266,23 @@ public class TeachingService {
             String topic,
             String bloom,
             String rubricId,
-            int count
+            int count,
+            List<String> documentIds
     ) {
         requireSubject(teacher.id(), subjectId);
         requireBloom(bloom);
         int bounded = Math.max(1, Math.min(count, 10));
-        List<VivaQuestionGenerator.Passage> passages = ingestion.retrieve(
-                subjectId,
-                topic,
-                Math.max(bounded * 2, 6)
-        );
+        List<String> selected = selectedDocuments(subjectId, documentIds);
+        int passageLimit = Math.max(bounded * 2, 6);
+        List<VivaQuestionGenerator.Passage> passages = selected.isEmpty()
+                ? ingestion.retrieve(subjectId, topic, passageLimit)
+                : ingestion.retrieveForDocuments(subjectId, selected, topic, passageLimit);
         if (passages.isEmpty()) {
             throw new ApiException(
                     HttpStatus.BAD_REQUEST,
-                    "Upload a PDF, DOCX, or PPTX for this subject before generating questions."
+                    selected.isEmpty()
+                            ? "Upload a PDF, DOCX, or PPTX for this subject before generating questions."
+                            : "The selected files have no readable text yet."
             );
         }
         requireRubric(rubricId, subjectId);
@@ -553,6 +574,41 @@ public class TeachingService {
             return null;
         }
         return value.trim();
+    }
+
+    /** Empty means every Ready file on the subject. A non-empty list is checked and used as-is. */
+    private List<String> selectedDocuments(String subjectId, List<String> documentIds) {
+        if (documentIds == null || documentIds.isEmpty()) {
+            return List.of();
+        }
+        List<String> unique = new ArrayList<>();
+        for (String id : documentIds) {
+            if (id == null || id.isBlank() || unique.contains(id)) {
+                continue;
+            }
+            unique.add(id.trim());
+        }
+        if (unique.isEmpty()) {
+            return List.of();
+        }
+        if (unique.size() > 20) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Select at most 20 files");
+        }
+        for (String id : unique) {
+            try {
+                UUID.fromString(id);
+            } catch (IllegalArgumentException exception) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "Unknown file");
+            }
+            String owner = ingestion.subjectIdOf(id);
+            if (owner == null || !owner.equals(subjectId)) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "That file is not part of this subject");
+            }
+            if (!"DONE".equals(ingestion.document(id).status())) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "Wait until the selected file is ready");
+            }
+        }
+        return unique;
     }
 
     private void requireSubject(String teacherId, String subjectId) {

@@ -946,6 +946,15 @@ public class JdbcDeskRepository {
         );
     }
 
+    public boolean courseExists(String subjectId) {
+        Integer count = jdbc.queryForObject(
+                "SELECT count(*) FROM course WHERE id = ?::uuid",
+                Integer.class,
+                subjectId
+        );
+        return count != null && count > 0;
+    }
+
     public boolean teacherOwnsSubject(String teacherId, String subjectId) {
         Integer count = jdbc.queryForObject(
                 """
