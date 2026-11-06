@@ -1,4 +1,4 @@
-"use client";
+git"use client";
 
 import { DashboardView } from "@/components/admin/dashboard/dashboard-view";
 import { useAdminDashboard } from "@/components/admin/dashboard/use-admin-dashboard";

@@ -24,6 +24,8 @@ export function AdminSettings() {
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
 
+  // Load the subject list, examiner list, and speech config from the backend so the
+  // admin can manage the current settings in one place.
   function load() {
     Promise.all([
       api<Subject[]>("/api/admin/subjects", { auth: true }),
@@ -49,6 +51,8 @@ export function AdminSettings() {
     load();
   }, []);
 
+  // Create a new subject and immediately refresh the list so the admin sees it without
+  // leaving the page.
   async function createSubject(event: FormEvent) {
     event.preventDefault();
     try {
@@ -61,6 +65,7 @@ export function AdminSettings() {
     }
   }
 
+  // Bind a teacher to a subject so the teacher can view only the assigned curriculum.
   async function assign(subjectId: string, teacherId: string) {
     if (!teacherId) return;
     try {
@@ -76,6 +81,8 @@ export function AdminSettings() {
     }
   }
 
+  // Persist STT/TTS choices for the exam system so speech recognition and voice output
+  // follow the admin-selected languages and voices.
   async function saveSpeech(event: FormEvent) {
     event.preventDefault();
     try {
