@@ -59,6 +59,24 @@ public class TeachingService {
         return desk.subjectsForTeacher(teacher.id());
     }
 
+    /** Every subject already in the bank, so a teacher can add questions to one they did not create. */
+    public List<SubjectItem> catalog(PublicUser teacher) {
+        return desk.subjects();
+    }
+
+    /** Grants this teacher the existing subject so uploads and AI drafts use the normal checks. */
+    public void useSubject(PublicUser teacher, String subjectId) {
+        try {
+            UUID.fromString(subjectId);
+        } catch (IllegalArgumentException exception) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Unknown subject");
+        }
+        if (!desk.courseExists(subjectId)) {
+            throw new ApiException(HttpStatus.NOT_FOUND, "Subject not found");
+        }
+        desk.assignTeacher(subjectId, teacher.id());
+    }
+
     public SubjectItem createSubject(PublicUser teacher, String code, String name) {
         String trimmedCode = code.trim();
         String trimmedName = name.trim();
