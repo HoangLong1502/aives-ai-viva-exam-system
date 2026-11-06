@@ -100,6 +100,7 @@ export function AdminSettings() {
 
   return (
     <div className="space-y-8">
+      {/* This top section acts as the page heading for the admin settings area. */}
       <section className="space-y-2">
         <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Settings</p>
         <h1 className="font-serif text-4xl tracking-tight">Subjects and speech</h1>
@@ -108,6 +109,8 @@ export function AdminSettings() {
         </p>
       </section>
 
+      {/* Subject management is the main admin responsibility here: each subject can be
+      created and linked to the relevant examiner(s). */}
       <Card>
         <CardHeader className="border-b">
           <CardTitle className="font-serif text-2xl">Subjects</CardTitle>
@@ -142,6 +145,7 @@ export function AdminSettings() {
         </CardContent>
       </Card>
 
+      {/* Speech settings control how the viva system listens and speaks during interviews. */}
       <Card>
         <CardHeader className="border-b">
           <CardTitle className="font-serif text-2xl">STT and TTS</CardTitle>
