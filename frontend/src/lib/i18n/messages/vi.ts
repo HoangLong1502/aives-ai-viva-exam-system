@@ -578,6 +578,7 @@ export const vi: Messages = {
       lead: "Tài khoản, môn học và kỳ thi mà bàn quản trị đang theo dõi.",
       loading: "Đang tải bảng điều khiển",
       retry: "Thử lại",
+      refresh: "Làm mới",
       stats: {
         students: "Sinh viên",
         studentsScope: "Tất cả tài khoản sinh viên",
