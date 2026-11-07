@@ -35,65 +35,57 @@ export function ExamStatusPanel({ stats, copy }: { stats: AdminStats; copy: Exam
   }
 
   return (
-    <Card className="min-w-0">
-      <CardContent className="grid gap-6 pt-0 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
-        <ul className="space-y-4" aria-hidden="true">
-          {rows.map((row) => (
-            <li key={row.status}>
-              <div className="mb-1.5 flex items-baseline justify-between gap-3 text-sm">
-                <span>{labelFor(row.status)}</span>
-                <span className="font-medium tabular-nums">{row.total.toLocaleString()}</span>
-              </div>
-              <div className="h-2.5 overflow-hidden rounded-full bg-muted">
-                <div
-                  className={`h-full rounded-full motion-safe:transition-[width] ${examStatusPresentation(row.status).barClass}`}
-                  style={{ width: `${(row.total / max) * 100}%` }}
-                />
-              </div>
-            </li>
-          ))}
-        </ul>
-
-        <div className="min-w-0 overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <caption className="sr-only">{copy.chartLabel}</caption>
-            <thead>
-              <tr className="border-b text-muted-foreground">
-                <th scope="col" className="py-2 pr-3 font-medium">
-                  {copy.status}
-                </th>
-                <th scope="col" className="px-3 py-2 text-right font-medium">
-                  {copy.multipleChoice}
-                </th>
-                <th scope="col" className="px-3 py-2 text-right font-medium">
-                  {copy.oral}
-                </th>
-                <th scope="col" className="py-2 pl-3 text-right font-medium">
-                  {copy.total}
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => (
-                <tr key={row.status} className="border-b last:border-0">
-                  <th scope="row" className="py-2.5 pr-3 font-normal">
-                    <StatusBadge
-                      label={labelFor(row.status)}
-                      variant={examStatusPresentation(row.status).tone}
-                    />
-                  </th>
-                  <td className="px-3 py-2.5 text-right tabular-nums">
-                    {row.multipleChoice.toLocaleString()}
-                  </td>
-                  <td className="px-3 py-2.5 text-right tabular-nums">{row.oral.toLocaleString()}</td>
-                  <td className="py-2.5 pl-3 text-right font-medium tabular-nums">
+    <Card className="@container min-w-0">
+      <CardContent className="space-y-5">
+        <ul className="grid gap-3 @xl:grid-cols-3" aria-label={copy.chartLabel}>
+          {rows.map((row) => {
+            const presentation = examStatusPresentation(row.status);
+            const share = (row.total / max) * 100;
+            const multipleChoiceShare = row.total === 0 ? 0 : (row.multipleChoice / row.total) * 100;
+            return (
+              <li
+                key={row.status}
+                className="flex flex-col rounded-xl bg-muted/50 p-4 ring-1 ring-foreground/[0.04]"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <StatusBadge label={labelFor(row.status)} variant={presentation.tone} />
+                  <p className="font-serif text-3xl leading-none tabular-nums tracking-tight">
                     {row.total.toLocaleString()}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                  </p>
+                </div>
+                <div
+                  className="mt-4 h-1.5 overflow-hidden rounded-full bg-background ring-1 ring-foreground/[0.05]"
+                  aria-hidden
+                >
+                  <div className="flex h-full" style={{ width: `${share}%` }}>
+                    <div className="h-full bg-primary" style={{ width: `${multipleChoiceShare}%` }} />
+                    <div className="h-full bg-highlight" style={{ width: `${100 - multipleChoiceShare}%` }} />
+                  </div>
+                </div>
+                <dl className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                  <div>
+                    <dt className="text-muted-foreground">{copy.multipleChoice}</dt>
+                    <dd className="mt-0.5 font-medium tabular-nums">{row.multipleChoice.toLocaleString()}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">{copy.oral}</dt>
+                    <dd className="mt-0.5 font-medium tabular-nums">{row.oral.toLocaleString()}</dd>
+                  </div>
+                </dl>
+              </li>
+            );
+          })}
+        </ul>
+        <p className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+          <span className="inline-flex items-center gap-1.5">
+            <span className="size-2 rounded-full bg-primary" aria-hidden />
+            {copy.multipleChoice}
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="size-2 rounded-full bg-highlight" aria-hidden />
+            {copy.oral}
+          </span>
+        </p>
       </CardContent>
     </Card>
   );
