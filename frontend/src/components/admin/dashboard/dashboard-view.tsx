@@ -5,9 +5,11 @@ import {
   CalendarClockIcon,
   CircleDotIcon,
   GraduationCapIcon,
+  RefreshCwIcon,
   ShieldIcon,
   UsersIcon,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { AttentionList } from "@/components/admin/dashboard/attention-list";
 import { AttemptTable, ResultsLink } from "@/components/admin/dashboard/attempt-table";
 import {
@@ -48,11 +50,21 @@ export function DashboardView({
   const errorText = (error: DashboardError) => dashboardErrorMessage(error, copy.error);
 
   return (
-    <div className="min-w-0 space-y-8">
-      <PageHeader eyebrow={t("brand.adminEyebrow")} title={t("nav.admin.dashboard")} />
+    <div className="min-w-0 space-y-10">
+      <PageHeader
+        eyebrow={t("brand.adminEyebrow")}
+        title={t("nav.admin.dashboard")}
+        description={copy.lead}
+        action={
+          <Button type="button" variant="outline" size="sm" onClick={onRefresh} disabled={refreshing}>
+            <RefreshCwIcon className={refreshing ? "animate-spin" : undefined} />
+            {copy.refresh}
+          </Button>
+        }
+      />
 
       <section aria-label={t("nav.admin.dashboard")}>
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {stats.status === "loading" ? (
             <LoadingSkeleton className="h-40 sm:col-span-2" label={copy.loading} />
           ) : null}
@@ -84,6 +96,7 @@ export function DashboardView({
                 hint={statsCopy.teachersHint}
                 href="/admin/people"
                 icon={UsersIcon}
+                tone="ink"
               />
               <StatCard
                 label={statsCopy.inProgress}
@@ -92,6 +105,7 @@ export function DashboardView({
                 hint={statsCopy.inProgressHint}
                 href="#exam-status"
                 icon={CircleDotIcon}
+                tone="amber"
                 emphasis
               />
               <StatCard
@@ -109,6 +123,7 @@ export function DashboardView({
                 hint={statsCopy.administratorsHint}
                 href="/admin/people"
                 icon={ShieldIcon}
+                tone="ink"
               />
             </>
           ) : null}
@@ -135,6 +150,16 @@ export function DashboardView({
             />
           ) : null}
         </div>
+      </section>
+
+      <section className="space-y-3" aria-labelledby="actions-heading">
+        <h2
+          id="actions-heading"
+          className="text-xs font-medium tracking-[0.18em] text-muted-foreground uppercase"
+        >
+          {copy.actions.title}
+        </h2>
+        <QuickActions copy={copy.actions} />
       </section>
 
       <div className="grid gap-8 xl:grid-cols-5">
@@ -201,11 +226,6 @@ export function DashboardView({
             locale={locale}
           />
         ) : null}
-      </section>
-
-      <section className="space-y-4" aria-labelledby="actions-heading">
-        <SectionHeader id="actions-heading" title={copy.actions.title} />
-        <QuickActions copy={copy.actions} />
       </section>
     </div>
   );
