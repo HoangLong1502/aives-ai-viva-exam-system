@@ -576,7 +576,9 @@ public class JdbcDeskRepository {
                 """
                 SELECT e.id::text, e.title, e.format, e.status,
                        COALESCE(c.name, 'General'), COALESCE(t.full_name, 'Unassigned'),
-                       a.id IS NOT NULL, a.score, a.status, e.duration_minutes,
+                       a.id IS NOT NULL,
+                       CASE WHEN a.graded_at IS NOT NULL THEN a.score END,
+                       a.status, e.duration_minutes,
                        CASE WHEN a.id IS NOT NULL AND a.status <> 'SUBMITTED' AND e.duration_minutes IS NOT NULL
                             THEN GREATEST(0, e.duration_minutes * 60
                                              - extract(epoch FROM (now() - a.started_at)))::int
@@ -876,7 +878,17 @@ public class JdbcDeskRepository {
 
     public List<AttemptItem> attemptsForStudent(String studentId) {
         return jdbc.query(
-                ATTEMPT_SELECT + " WHERE a.student_id = ?::uuid ORDER BY a.started_at DESC",
+                """
+                SELECT a.id::text, e.id::text, e.title, s.full_name, COALESCE(t.full_name, ''),
+                       CASE WHEN a.graded_at IS NOT NULL THEN a.score END,
+                       e.status, a.status
+                FROM exam_attempt a
+                JOIN exam_session e ON e.id = a.session_id
+                JOIN "user" s ON s.id = a.student_id
+                LEFT JOIN "user" t ON t.id = e.teacher_id
+                WHERE a.student_id = ?::uuid
+                ORDER BY a.started_at DESC
+                """,
                 attemptMapper(),
                 studentId
         );
@@ -890,7 +902,7 @@ public class JdbcDeskRepository {
         return jdbc.update(
                 """
                 UPDATE exam_attempt a
-                SET score = ?
+                SET score = ?, graded_at = now()
                 FROM exam_session e
                 WHERE a.id = ?::uuid AND a.session_id = e.id AND e.teacher_id = ?::uuid
                 """,

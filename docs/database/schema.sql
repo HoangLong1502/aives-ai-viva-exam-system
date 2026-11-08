@@ -179,6 +179,7 @@ CREATE TABLE exam_attempt (
   started_at timestamptz NOT NULL DEFAULT now(),
   submitted_at timestamptz,
   score int, -- compatibility: teacher score used by existing score screens
+  graded_at timestamptz, -- set when the teacher publishes the score; students cannot see the score before this
   UNIQUE (session_id, student_id)
 );
 

@@ -21,6 +21,23 @@ ALTER TABLE answer ADD COLUMN IF NOT EXISTS teacher_score numeric(5,2);
 ALTER TABLE answer ADD COLUMN IF NOT EXISTS teacher_feedback text;
 ALTER TABLE answer ADD COLUMN IF NOT EXISTS graded_by uuid;
 ALTER TABLE answer ADD COLUMN IF NOT EXISTS graded_at timestamptz;
+
+ALTER TABLE exam_attempt ADD COLUMN IF NOT EXISTS graded_at timestamptz;
+-- A submitted attempt keeps its AI score for the teacher. The student sees it only after the teacher
+-- has marked every answered question.
+UPDATE exam_attempt a
+SET graded_at = now()
+WHERE a.graded_at IS NULL
+  AND EXISTS (
+    SELECT 1 FROM question_turn qt
+    JOIN answer ans ON ans.turn_id = qt.id
+    WHERE qt.attempt_id = a.id AND ans.teacher_score IS NOT NULL
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM question_turn qt
+    JOIN answer ans ON ans.turn_id = qt.id
+    WHERE qt.attempt_id = a.id AND ans.teacher_score IS NULL
+  );
 ALTER TABLE answer DROP CONSTRAINT IF EXISTS ck_answer_teacher_score;
 ALTER TABLE answer ADD CONSTRAINT ck_answer_teacher_score CHECK (teacher_score IS NULL OR (teacher_score >= 0 AND teacher_score <= 100));
 

@@ -197,7 +197,15 @@ export function ScoreTable({
                   </div>
                 ) : (
                   <div className="flex items-center gap-4">
-                    <p className="font-serif text-2xl tabular-nums">{row.score ?? "—"}</p>
+                    {row.score != null ? (
+                      <p className="font-serif text-2xl tabular-nums">{row.score}</p>
+                    ) : row.attemptStatus === "SUBMITTED" ? (
+                      <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
+                        {t("student.tests.awaitingGrade")}
+                      </p>
+                    ) : (
+                      <p className="font-serif text-2xl tabular-nums">—</p>
+                    )}
                     {reviewHref?.(row) ? (
                       <Button variant="outline" size="sm" nativeButton={false} render={<Link href={reviewHref(row)!} />}>
                         {t("student.scores.review")}

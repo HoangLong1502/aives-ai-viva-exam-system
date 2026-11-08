@@ -93,19 +93,25 @@ public class GradingService {
             throw new ApiException(HttpStatus.CONFLICT, "Submit the exam before reviewing it");
         }
         AttemptGrading full = grading(header, attemptId);
+        boolean published = header.score() != null;
         List<QuestionGrading> questions = full.questions().stream()
                 .map(question -> new QuestionGrading(
                         question.questionId(), question.number(), question.maxPoints(), question.prompt(), null, null,
-                        question.answered(), question.aiScore(), question.teacherScore(), question.teacherFeedback(),
+                        question.answered(),
+                        published ? question.aiScore() : null,
+                        question.teacherScore(),
+                        question.teacherFeedback(),
                         question.turns().stream()
                                 .map(turn -> new TurnItem(
                                         turn.turnId(), turn.turnNo(), turn.turnType(), turn.questionText(),
-                                        turn.transcript(), turn.answered(), turn.aiScore(), turn.aiFeedback(), null))
+                                        turn.transcript(), turn.answered(),
+                                        published ? turn.aiScore() : null,
+                                        turn.aiFeedback(), null))
                                 .toList()))
                 .toList();
         return new AttemptGrading(
                 full.attemptId(), full.examId(), full.examTitle(), full.courseId(), full.courseName(),
-                full.studentName(), full.studentCode(), full.status(), full.score(), questions);
+                full.studentName(), full.studentCode(), full.status(), published ? full.score() : null, questions);
     }
 
     private AttemptGrading grading(AttemptHeader header, String attemptId) {
@@ -178,6 +184,7 @@ public class GradingService {
         Map<String, Double> best = desk.bestAnswerScores(attemptId);
         int score = AttemptScoring.finalScore(questions, best);
         grading.updateAttemptScore(attemptId, score);
+        grading.publishScoreWhenFullyGraded(attemptId);
         return score;
     }
 

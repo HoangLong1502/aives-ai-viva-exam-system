@@ -494,6 +494,8 @@ export const vi: Messages = {
       finishExam: "Nộp bài & Hoàn thành",
       examFinished: "Đã hoàn thành ca thi viva thành công!",
       examFinishedWithScore: "Đã nộp bài. Điểm: {score}/100 (đã trả lời {answered}/{total} câu).",
+      awaitingGrade: "Đang chờ giáo viên chấm",
+      examSubmittedAwaiting: "Đã nộp bài. Đang chờ giáo viên chấm.",
       aiFeedback: "Nhận xét của AI:",
       answerScore: "Điểm: {score} / 100",
       skipQuestion: "Bỏ qua câu này",

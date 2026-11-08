@@ -7,7 +7,6 @@ import {
   Loader2Icon,
   EraserIcon,
   MicIcon,
-  SparklesIcon,
   TimerIcon,
   Volume2Icon,
 } from "lucide-react";
@@ -348,11 +347,12 @@ export function StudentTests() {
                   {session.attemptStatus === "SUBMITTED" ? (
                     <div className="flex shrink-0 items-center gap-3">
                       <span className="rounded-full bg-emerald-500/12 px-2.5 py-1 text-xs font-medium text-emerald-800 ring-1 ring-emerald-600/20 ring-inset dark:text-emerald-300">
-                        {t("student.tests.submitted")}
-                        {session.score != null ? ` · ${t("student.tests.score")} ${session.score}` : ""}
+                        {session.score != null
+                          ? `${t("student.tests.submitted")} · ${t("student.tests.score")} ${session.score}`
+                          : t("student.tests.awaitingGrade")}
                       </span>
                       <Button variant="outline" nativeButton={false} render={<Link href="/student/scores" />}>
-                        {t("student.tests.viewScore")}
+                        {session.score != null ? t("student.tests.viewScore") : t("student.scores.review")}
                       </Button>
                     </div>
                   ) : (
@@ -665,17 +665,11 @@ function VivaExamRoom({
     stopListeningRef.current();
     stopTTS();
     try {
-      const result = await api<SubmitResult>(`/api/student/exams/${session.id}/submit`, {
+      await api<SubmitResult>(`/api/student/exams/${session.id}/submit`, {
         method: "POST",
         auth: true,
       });
-      toast.success(
-        tRef.current("student.tests.examFinishedWithScore", {
-          score: String(result.score),
-          answered: String(result.answeredQuestions),
-          total: String(result.totalQuestions),
-        }),
-      );
+      toast.success(tRef.current("student.tests.examSubmittedAwaiting"));
       onComplete();
     } catch (err) {
       finishingRef.current = false;
@@ -1131,13 +1125,6 @@ function VivaExamRoom({
           {!isSupported ? (
             <p className="text-xs text-destructive">
               {t("student.tests.sttUnsupported")}
-            </p>
-          ) : null}
-
-          {currentEvaluation ? (
-            <p className="flex items-center gap-2 text-xs text-muted-foreground">
-              <SparklesIcon className="size-3.5 text-primary" />
-              {t("student.tests.answerScore", { score: String(currentEvaluation.score) })}
             </p>
           ) : null}
 
