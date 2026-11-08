@@ -145,7 +145,7 @@ export function AttemptTable({
             <TableScroller>
               <table className="w-full min-w-[40rem] text-left text-sm">
                 <thead>
-                  <tr className="border-b text-muted-foreground">
+                  <tr className="border-b border-border/70 text-muted-foreground">
                     <SortHeader
                       label={copy.exam}
                       column="examTitle"
@@ -186,11 +186,14 @@ export function AttemptTable({
                 </thead>
                 <tbody>
                   {visible.map((attempt) => (
-                    <tr key={attempt.id} className="border-b last:border-0">
+                    <tr
+                      key={attempt.id}
+                      className="border-b border-border/60 transition-colors last:border-0 hover:bg-muted/50"
+                    >
                       <td className="py-3 pr-3 font-medium">{attempt.examTitle}</td>
                       <td className="px-2 py-3">{attempt.studentName}</td>
                       <td className="px-2 py-3">{attempt.teacherName || "—"}</td>
-                      <td className="px-2 py-3 text-right whitespace-nowrap tabular-nums">
+                      <td className="px-2 py-3 text-right font-medium whitespace-nowrap tabular-nums">
                         {attempt.score === null ? (
                           <span aria-label={copy.noScore}>—</span>
                         ) : (

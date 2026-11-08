@@ -578,6 +578,7 @@ export const en = {
       lead: "Accounts, subjects, and exams the administration desk can already see.",
       loading: "Loading dashboard",
       retry: "Try again",
+      refresh: "Refresh",
       stats: {
         students: "Students",
         studentsScope: "All student accounts",
