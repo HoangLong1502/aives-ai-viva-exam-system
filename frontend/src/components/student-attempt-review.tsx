@@ -101,8 +101,16 @@ export function StudentAttemptReview({ attemptId }: { attemptId: string }) {
           <div className="flex items-center gap-4">
             {back}
             <div className="text-right">
-              <p className="text-xs text-muted-foreground">{t("student.review.finalScore")}</p>
-              <p className="font-serif text-4xl tabular-nums">{review.score ?? "—"}</p>
+              {review.score != null ? (
+                <>
+                  <p className="text-xs text-muted-foreground">{t("student.review.finalScore")}</p>
+                  <p className="font-serif text-4xl tabular-nums">{review.score}</p>
+                </>
+              ) : (
+                <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
+                  {t("student.tests.awaitingGrade")}
+                </p>
+              )}
             </div>
           </div>
         }
@@ -111,7 +119,7 @@ export function StudentAttemptReview({ attemptId }: { attemptId: string }) {
       <ol className="space-y-5">
         {review.questions.map((question) => {
           const graded = question.teacherScore != null;
-          const earned = points(question.teacherScore ?? question.aiScore, question.maxPoints);
+          const earned = review.score == null ? null : points(question.teacherScore ?? question.aiScore, question.maxPoints);
           return (
             <li key={question.questionId}>
               <Card>
@@ -134,10 +142,12 @@ export function StudentAttemptReview({ attemptId }: { attemptId: string }) {
                         }
                         variant={!question.answered ? "neutral" : graded ? "success" : "warning"}
                       />
-                      <p className="font-serif text-2xl tabular-nums">
-                        {earned ?? "—"}
-                        <span className="text-sm text-muted-foreground"> / {question.maxPoints}</span>
-                      </p>
+                      {review.score != null ? (
+                        <p className="font-serif text-2xl tabular-nums">
+                          {earned ?? "—"}
+                          <span className="text-sm text-muted-foreground"> / {question.maxPoints}</span>
+                        </p>
+                      ) : null}
                     </div>
                   </div>
                 </CardHeader>

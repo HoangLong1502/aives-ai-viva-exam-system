@@ -309,12 +309,17 @@ function wavSeconds(bytes: Uint8Array): number {
   return (bytes.byteLength - 44) / 2 / rate;
 }
 
-/** A preempted /speak still ends as HTTP 200 with a short fragment of a long question. */
+/**
+ * A preempted /speak still ends as HTTP 200 with a short fragment.
+ * A finished line is about 0.2s per word, so the bar stays under that.
+ * The old 0.22s bar rejected complete lines, the client fetched them again,
+ * and a reply then skipped the opening sentence.
+ */
 function assertAudible(bytes: Uint8Array, text: string) {
   if (bytes.byteLength <= 44) throw new Error("ZeroTTS returned no audio");
   const words = text.trim().split(/\s+/).filter(Boolean).length;
   const seconds = wavSeconds(bytes);
-  const minimum = words >= 12 ? words * 0.22 : words >= 6 ? 0.45 : 0;
+  const minimum = words >= 8 ? words * 0.12 : words >= 4 ? 0.3 : 0;
   if (seconds < minimum) throw new Error("ZeroTTS returned a cut-off recording");
 }
 
@@ -643,44 +648,6 @@ async function takeExamClip(voice: string, text: string, signal: AbortSignal): P
   }
 }
 
-/** Break a reply into short sentences so each one can be loaded whole, then spoken smoothly. */
-function replyPieces(text: string): string[] {
-  const cleaned = text.replace(/\s+/g, " ").trim();
-  if (!cleaned) return [];
-  const rough = cleaned.split(/(?<=[.!?…。])\s+|\n+/);
-  const pieces: string[] = [];
-  for (const part of rough) {
-    const words = part.trim().split(/\s+/).filter(Boolean);
-    if (words.length === 0) continue;
-    if (words.length <= 14) {
-      pieces.push(words.join(" "));
-      continue;
-    }
-    let buf: string[] = [];
-    for (const word of words) {
-      buf.push(word);
-      const atBreak = /[,;:]$/.test(word) && buf.length >= 8;
-      if (atBreak || buf.length >= 14) {
-        pieces.push(buf.join(" "));
-        buf = [];
-      }
-    }
-    if (buf.length > 0) pieces.push(buf.join(" "));
-  }
-  const merged: string[] = [];
-  for (const piece of pieces) {
-    const prev = merged[merged.length - 1];
-    const count = piece.split(/\s+/).length;
-    // A one-word tail such as "văn." is the end of the previous sentence, not a new utterance.
-    if (prev && count < 4) {
-      merged[merged.length - 1] = `${prev} ${piece}`;
-    } else {
-      merged.push(piece);
-    }
-  }
-  return merged;
-}
-
 async function downloadSentence(voice: string, text: string, signal: AbortSignal): Promise<Blob> {
   const key = clipKey(voice, text);
   const existing = preparedClips.get(key);
@@ -724,81 +691,86 @@ async function downloadSentence(voice: string, text: string, signal: AbortSignal
   }
 }
 
-/** Load one short sentence completely, play it in one piece, and prepare the next sentence while it plays. */
+/** Load the whole reply, then speak it in one pass. */
 async function speakImmediate(
   voice: string,
   text: string,
   signal: AbortSignal,
   hooks: { onStart?: () => void; onEnd?: () => void },
 ): Promise<void> {
-  const pieces = replyPieces(text);
-  if (pieces.length === 0) return;
+  const clean = text.replace(/\s+/g, " ").trim();
+  if (!clean) return;
   const release = holdServer();
-  forgetQueued(voice, text);
+  forgetQueued(voice, clean);
   const displaced = displaceInFlight();
   if (displaced) prefetchQueue.unshift(displaced);
-  let played = false;
-  let ended = false;
-  const finish = () => {
-    if (ended || signal.aborted) return;
-    ended = true;
-    hooks.onEnd?.();
-  };
   try {
-    let upcoming: Promise<Blob> | null = downloadSentence(voice, pieces[0], signal);
-    for (let i = 0; i < pieces.length; i += 1) {
-      let blob: Blob | null = null;
+    let blob: Blob | null = null;
+    try {
+      blob = await downloadSentence(voice, clean, signal);
+    } catch {
+      if (signal.aborted) return;
+      blob = null;
+    }
+    if (!blob && !signal.aborted) {
       try {
-        blob = await upcoming;
+        blob = await downloadSentence(voice, clean, signal);
       } catch {
         if (signal.aborted) return;
         blob = null;
       }
-      if (!blob && !signal.aborted) {
-        try {
-          blob = await downloadSentence(voice, pieces[i], signal);
-        } catch {
-          if (signal.aborted) return;
-          blob = null;
-        }
-      }
-      if (signal.aborted) return;
-      const next = pieces[i + 1];
-      upcoming = next ? downloadSentence(voice, next, signal) : null;
-      if (!blob) continue;
-      const last = i === pieces.length - 1;
-      await playCompleteWav(new Uint8Array(await blob.arrayBuffer()), signal, {
-        onStart: played ? undefined : hooks.onStart,
-        onEnd: last ? finish : undefined,
-      });
-      played = true;
-      if (signal.aborted) return;
     }
-    if (!played) throw new Error("ZeroTTS returned no audio");
-    finish();
+    if (signal.aborted) return;
+    if (!blob) throw new Error("ZeroTTS returned no audio");
+    await playCompleteWav(new Uint8Array(await blob.arrayBuffer()), signal, {
+      leadInSec: REPLY_LEAD_IN_SEC,
+      onStart: hooks.onStart,
+      onEnd: hooks.onEnd,
+    });
   } finally {
     release();
   }
 }
 
+let keepAlive: AudioBufferSourceNode | null = null;
+
 function audioCtx(): AudioContext {
   if (!audioContext || audioContext.state === "closed") {
     audioContext = new AudioContext();
+    keepAlive = null;
   }
   return audioContext;
+}
+
+/** Keep the output device awake so the first words of a reply are not eaten after silence. */
+function keepOutputAwake(ctx: AudioContext) {
+  if (keepAlive || ctx.state !== "running") return;
+  const buffer = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < data.length; i += 1) {
+    data[i] = Math.sin((2 * Math.PI * 30 * i) / ctx.sampleRate) * 0.0015;
+  }
+  const source = ctx.createBufferSource();
+  source.buffer = buffer;
+  source.loop = true;
+  source.connect(ctx.destination);
+  source.start();
+  keepAlive = source;
 }
 
 /** Call from the click that opens the exam so the first question is allowed to play. */
 export function primeTTS(): void {
   const ctx = audioCtx();
-  void ctx.resume().catch(() => {});
+  void ctx.resume().then(() => keepOutputAwake(ctx)).catch(() => {});
 }
 
 /** Silence at the front so the output device can wake without eating the first words. */
-const LEAD_IN_SEC = 0.18;
+const LEAD_IN_SEC = 0.4;
+/** A reply starts after the student has been speaking, so the speakers have gone idle. */
+const REPLY_LEAD_IN_SEC = 0.9;
 
-function withLeadIn(ctx: AudioContext, buffer: AudioBuffer): AudioBuffer {
-  const lead = Math.floor(buffer.sampleRate * LEAD_IN_SEC);
+function withLeadIn(ctx: AudioContext, buffer: AudioBuffer, leadInSec: number): AudioBuffer {
+  const lead = Math.floor(buffer.sampleRate * leadInSec);
   if (lead <= 0) return buffer;
   const out = ctx.createBuffer(buffer.numberOfChannels, buffer.length + lead, buffer.sampleRate);
   for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
@@ -807,14 +779,14 @@ function withLeadIn(ctx: AudioContext, buffer: AudioBuffer): AudioBuffer {
   return out;
 }
 
-function wavWithLeadIn(wav: Uint8Array): Uint8Array {
+function wavWithLeadIn(wav: Uint8Array, leadInSec: number): Uint8Array {
   if (wav.byteLength < 44) return wav;
   const view = new DataView(wav.buffer, wav.byteOffset, wav.byteLength);
   const rate = view.getUint32(24, true);
   const channels = view.getUint16(22, true) || 1;
   const bits = view.getUint16(34, true) || 16;
   const bytesPerSample = Math.max(1, bits / 8);
-  const leadBytes = Math.floor(rate * LEAD_IN_SEC) * channels * bytesPerSample;
+  const leadBytes = Math.floor(rate * leadInSec) * channels * bytesPerSample;
   if (!rate || leadBytes <= 0) return wav;
   const out = new Uint8Array(wav.byteLength + leadBytes);
   out.set(wav.subarray(0, 44), 0);
@@ -830,22 +802,24 @@ function wavWithLeadIn(wav: Uint8Array): Uint8Array {
 async function playCompleteWav(
   wav: Uint8Array,
   signal: AbortSignal,
-  hooks: { onStart?: () => void; onEnd?: () => void },
+  hooks: { onStart?: () => void; onEnd?: () => void; leadInSec?: number },
 ): Promise<void> {
+  const leadInSec = hooks.leadInSec ?? LEAD_IN_SEC;
   const ctx = audioCtx();
   try {
     await ctx.resume();
   } catch {
     // Fall through to an <audio> element when the context cannot start.
   }
+  keepOutputAwake(ctx);
   if (ctx.state !== "running") {
-    await playBufferedWav([wav], signal, hooks);
+    await playBufferedWav([wav], signal, hooks, leadInSec);
     return;
   }
   const copy = wav.buffer.slice(wav.byteOffset, wav.byteOffset + wav.byteLength);
   const decoded = await ctx.decodeAudioData(copy as ArrayBuffer);
   if (signal.aborted) return;
-  const buffer = withLeadIn(ctx, decoded);
+  const buffer = withLeadIn(ctx, decoded, leadInSec);
   await new Promise<void>((resolve, reject) => {
     const source = ctx.createBufferSource();
     activeSource = source;
@@ -883,6 +857,7 @@ function playBufferedWav(
   chunks: Uint8Array[],
   signal: AbortSignal,
   hooks: { onStart?: () => void; onEnd?: () => void },
+  leadInSec = LEAD_IN_SEC,
 ): Promise<void> {
   const total = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
   const wav = new Uint8Array(total);
@@ -897,7 +872,7 @@ function playBufferedWav(
     view.setUint32(4, 36 + dataSize, true);
     view.setUint32(40, dataSize, true);
   }
-  const url = URL.createObjectURL(new Blob([wavWithLeadIn(wav)], { type: "audio/wav" }));
+  const url = URL.createObjectURL(new Blob([wavWithLeadIn(wav, leadInSec)], { type: "audio/wav" }));
   const audio = new Audio(url);
   currentAudio = audio;
   return new Promise((resolve, reject) => {

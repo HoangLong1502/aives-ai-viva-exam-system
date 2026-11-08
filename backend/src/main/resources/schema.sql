@@ -176,6 +176,7 @@ CREATE TABLE exam_attempt (
   started_at timestamptz NOT NULL DEFAULT now(),
   submitted_at timestamptz,
   score int,
+  graded_at timestamptz,
   UNIQUE (session_id, student_id)
 );
 

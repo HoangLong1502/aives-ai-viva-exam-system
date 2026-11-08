@@ -171,7 +171,8 @@ public class JdbcGradingRepository {
         List<AttemptHeader> rows = jdbc.query(
                 """
                 SELECT a.id::text, e.id::text, e.title, e.course_id::text, COALESCE(c.name, ''),
-                       s.full_name, COALESCE(s.student_code, ''), a.status, a.score
+                       s.full_name, COALESCE(s.student_code, ''), a.status,
+                       CASE WHEN a.graded_at IS NOT NULL THEN a.score END
                 FROM exam_attempt a
                 JOIN exam_session e ON e.id = a.session_id
                 JOIN "user" s ON s.id = a.student_id
@@ -231,5 +232,27 @@ public class JdbcGradingRepository {
 
     public void updateAttemptScore(String attemptId, int score) {
         jdbc.update("UPDATE exam_attempt SET score = ? WHERE id = ?::uuid", score, attemptId);
+    }
+
+    /** The student can see the score once every answered question has a teacher mark. */
+    public void publishScoreWhenFullyGraded(String attemptId) {
+        jdbc.update(
+                """
+                UPDATE exam_attempt a
+                SET graded_at = now()
+                WHERE a.id = ?::uuid
+                  AND EXISTS (
+                    SELECT 1 FROM question_turn qt
+                    JOIN answer ans ON ans.turn_id = qt.id
+                    WHERE qt.attempt_id = a.id AND ans.teacher_score IS NOT NULL
+                  )
+                  AND NOT EXISTS (
+                    SELECT 1 FROM question_turn qt
+                    JOIN answer ans ON ans.turn_id = qt.id
+                    WHERE qt.attempt_id = a.id AND ans.teacher_score IS NULL
+                  )
+                """,
+                attemptId
+        );
     }
 }

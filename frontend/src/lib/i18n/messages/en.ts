@@ -492,6 +492,8 @@ export const en = {
       finishExam: "Submit & Complete",
       examFinished: "Viva exam submitted successfully!",
       examFinishedWithScore: "Exam submitted. Score: {score}/100 ({answered}/{total} questions answered).",
+      awaitingGrade: "Waiting for the teacher to grade",
+      examSubmittedAwaiting: "Exam submitted. Waiting for the teacher to grade.",
       aiFeedback: "AI Feedback:",
       answerScore: "Score: {score} / 100",
       skipQuestion: "Skip this question",
